@@ -166,6 +166,48 @@ public class OtpService {
         return verifyAndGetOtp(identifier, otp, type).isPresent();
     }
 
+    public boolean verifyOtpWithoutConsuming(String identifier, String otp, OtpData.OtpType type) {
+        try {
+            Optional<OtpData> otpDataOpt = otpRepository.findById(identifier);
+
+            if (otpDataOpt.isEmpty()) {
+                log.warn("No OTP found for identifier: {}", identifier);
+                return false;
+            }
+
+            OtpData otpData = otpDataOpt.get();
+
+            // Check if OTP type matches
+            if (otpData.getType() != type) {
+                log.warn("OTP type mismatch for identifier: {}", identifier);
+                return false;
+            }
+
+            // Check if OTP is expired
+            if (otpData.isExpired()) {
+                log.warn("OTP expired for identifier: {}", identifier);
+                return false;
+            }
+
+            // Check if max attempts exceeded
+            if (otpData.hasExceededMaxAttempts(maxAttempts)) {
+                log.warn("Max OTP attempts exceeded for identifier: {}", identifier);
+                return false;
+            }
+
+            // Verify OTP without consuming it
+            if (!otpData.getOtp().equals(otp)) {
+                log.warn("Invalid OTP for identifier: {}", identifier);
+                return false;
+            }
+
+            return true;
+        } catch (Exception e) {
+            log.error("Unexpected error during OTP verification: {}", e.getMessage());
+            return false;
+        }
+    }
+
     public Optional<OtpData> verifyAndGetOtp(String identifier, String otp, OtpData.OtpType type) {
         try {
             Optional<OtpData> otpDataOpt = otpRepository.findById(identifier);
