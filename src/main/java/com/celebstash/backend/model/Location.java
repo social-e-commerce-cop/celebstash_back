@@ -14,22 +14,40 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "wallets")
-public class Wallet {
+@Table(name = "locations")
+public class Location {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false, unique = true)
-    private User user;
+    @Column(nullable = false)
+    private String name;
 
     @Column(nullable = false)
-    private BigDecimal balance;
+    private String address;
 
-    @Column(length = 6)
-    private String pin;
+    @Column
+    private String city;
+
+    @Column
+    private String state;
+
+    @Column
+    private String zipCode;
+
+    @Column
+    private String country;
+
+    @Column(nullable = false)
+    private BigDecimal deliveryFee;
+
+    @Column(nullable = false)
+    private Boolean active;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id")
+    private User user;
 
     @Column(nullable = false)
     private LocalDateTime createdAt;
@@ -39,8 +57,8 @@ public class Wallet {
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
-        if (balance == null) {
-            balance = BigDecimal.ZERO;
+        if (active == null) {
+            active = true;
         }
     }
 

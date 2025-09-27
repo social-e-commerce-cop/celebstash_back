@@ -6,38 +6,42 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.math.BigDecimal;
 
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "cart_items")
-public class CartItem {
+@Table(name = "order_items")
+public class OrderItem {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "cart_id", nullable = false)
-    private Cart cart;
+    @JoinColumn(name = "order_id", nullable = false)
+    private Order order;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "product_id", nullable = false)
     private Product product;
 
     @Column(nullable = false)
-    private Integer quantity;
+    private String productName;
 
     @Column(nullable = false)
-    private LocalDateTime addedAt;
+    private BigDecimal price;
 
-    @PrePersist
-    protected void onCreate() {
-        if (addedAt == null) {
-            addedAt = LocalDateTime.now();
-        }
+    @Column(nullable = false)
+    private Integer quantity;
+
+    @Column
+    private String notes;
+
+    // Calculated field
+    public BigDecimal getSubtotal() {
+        return price.multiply(BigDecimal.valueOf(quantity));
     }
 }

@@ -96,6 +96,7 @@ public class CartService {
                     .cart(cart)
                     .product(product)
                     .quantity(quantity)
+                    .addedAt(LocalDateTime.now())
                     .build();
             cartItemRepository.save(newItem);
         }
@@ -184,8 +185,22 @@ public class CartService {
      * @return the cart response DTO
      */
     private CartResponse mapToCartResponse(Cart cart) {
-        List<CartItem> cartItems = cartItemRepository.findByCart(cart);
-        List<CartItemResponse> cartItemResponses = cartItems.stream()
+        // Get all cart items
+        List<CartItem> allCartItems = cartItemRepository.findByCart(cart);
+
+        // Filter out expired items (older than 24 hours)
+        LocalDateTime expirationTime = LocalDateTime.now().minusHours(24);
+        List<CartItem> validCartItems = allCartItems.stream()
+                .filter(item -> item.getAddedAt() == null || item.getAddedAt().isAfter(expirationTime))
+                .collect(Collectors.toList());
+
+        // Remove expired items from the cart
+        allCartItems.stream()
+                .filter(item -> item.getAddedAt() != null && item.getAddedAt().isBefore(expirationTime))
+                .forEach(item -> cartItemRepository.delete(item));
+
+        // Map valid items to response
+        List<CartItemResponse> cartItemResponses = validCartItems.stream()
                 .map(this::mapToCartItemResponse)
                 .collect(Collectors.toList());
 

@@ -1,5 +1,6 @@
 package com.celebstash.backend.controller;
 
+import com.celebstash.backend.dto.wallet.SetPinRequest;
 import com.celebstash.backend.dto.wallet.TopUpRequest;
 import com.celebstash.backend.dto.wallet.TransactionResponse;
 import com.celebstash.backend.dto.wallet.WalletResponse;
@@ -13,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/wallet")
@@ -41,5 +43,20 @@ public class WalletController {
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<List<TransactionResponse>> getTransactionHistory() {
         return ResponseEntity.ok(walletService.getTransactionHistory());
+    }
+
+    @PostMapping("/pin")
+    @Operation(summary = "Set wallet PIN", description = "Sets or updates the PIN for the user's wallet")
+    @SecurityRequirement(name = "bearerAuth")
+    public ResponseEntity<WalletResponse> setPin(@Valid @RequestBody SetPinRequest request) {
+        return ResponseEntity.ok(walletService.setPin(request.getPin()));
+    }
+
+    @GetMapping("/pin/status")
+    @Operation(summary = "Check PIN status", description = "Checks if the user's wallet has a PIN set")
+    @SecurityRequirement(name = "bearerAuth")
+    public ResponseEntity<Map<String, Boolean>> hasPinSet() {
+        boolean hasPinSet = walletService.hasPinSet();
+        return ResponseEntity.ok(Map.of("hasPinSet", hasPinSet));
     }
 }

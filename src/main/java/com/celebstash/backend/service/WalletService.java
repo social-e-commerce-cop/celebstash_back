@@ -70,7 +70,7 @@ public class WalletService {
     @Transactional
     public WalletResponse topUpWallet(TopUpRequest request) {
         Wallet wallet = getOrCreateWallet();
-        
+
         // Create a deposit transaction
         Transaction transaction = Transaction.builder()
                 .wallet(wallet)
@@ -81,14 +81,14 @@ public class WalletService {
                 .createdAt(LocalDateTime.now())
                 .completedAt(LocalDateTime.now())
                 .build();
-        
+
         // Update wallet balance
         wallet.setBalance(wallet.getBalance().add(request.getAmount()));
-        
+
         // Save transaction and wallet
         transactionRepository.save(transaction);
         walletRepository.save(wallet);
-        
+
         return mapToWalletResponse(wallet);
     }
 
@@ -107,21 +107,25 @@ public class WalletService {
      * Deduct funds from the user's wallet for a purchase
      * @param amount the amount to deduct
      * @param productId the ID of the product being purchased
+     * @param pin the wallet PIN for verification
      * @return the updated wallet response
      */
     @Transactional
-    public WalletResponse deductFunds(BigDecimal amount, Long productId) {
+    public WalletResponse deductFunds(BigDecimal amount, Long productId, String pin) {
         Wallet wallet = getOrCreateWallet();
-        
+
+        // Verify PIN
+        verifyPin(wallet, pin);
+
         // Check if user has sufficient balance
         if (wallet.getBalance().compareTo(amount) < 0) {
             throw new AppException("Insufficient balance", HttpStatus.BAD_REQUEST);
         }
-        
+
         // Get the product
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new AppException("Product not found", HttpStatus.NOT_FOUND));
-        
+
         // Create a purchase transaction
         Transaction transaction = Transaction.builder()
                 .wallet(wallet)
@@ -133,14 +137,56 @@ public class WalletService {
                 .createdAt(LocalDateTime.now())
                 .completedAt(LocalDateTime.now())
                 .build();
-        
+
         // Update wallet balance
         wallet.setBalance(wallet.getBalance().subtract(amount));
-        
+
         // Save transaction and wallet
         transactionRepository.save(transaction);
         walletRepository.save(wallet);
-        
+
+        return mapToWalletResponse(wallet);
+    }
+
+    /**
+     * Deduct funds from the user's wallet for a purchase (without PIN verification)
+     * This method is for internal use only and should not be exposed via API
+     * @param amount the amount to deduct
+     * @param productId the ID of the product being purchased
+     * @return the updated wallet response
+     */
+    @Transactional
+    public WalletResponse deductFundsInternal(BigDecimal amount, Long productId) {
+        Wallet wallet = getOrCreateWallet();
+
+        // Check if user has sufficient balance
+        if (wallet.getBalance().compareTo(amount) < 0) {
+            throw new AppException("Insufficient balance", HttpStatus.BAD_REQUEST);
+        }
+
+        // Get the product
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new AppException("Product not found", HttpStatus.NOT_FOUND));
+
+        // Create a purchase transaction
+        Transaction transaction = Transaction.builder()
+                .wallet(wallet)
+                .amount(amount)
+                .type(TransactionType.PURCHASE)
+                .status(TransactionStatus.COMPLETED)
+                .description("Purchase of " + product.getName())
+                .product(product)
+                .createdAt(LocalDateTime.now())
+                .completedAt(LocalDateTime.now())
+                .build();
+
+        // Update wallet balance
+        wallet.setBalance(wallet.getBalance().subtract(amount));
+
+        // Save transaction and wallet
+        transactionRepository.save(transaction);
+        walletRepository.save(wallet);
+
         return mapToWalletResponse(wallet);
     }
 
@@ -153,16 +199,16 @@ public class WalletService {
     @Transactional
     public TransactionResponse reserveFundsForBid(BigDecimal amount, Long productId) {
         Wallet wallet = getOrCreateWallet();
-        
+
         // Check if user has sufficient balance
         if (wallet.getBalance().compareTo(amount) < 0) {
             throw new AppException("Insufficient balance", HttpStatus.BAD_REQUEST);
         }
-        
+
         // Get the product
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new AppException("Product not found", HttpStatus.NOT_FOUND));
-        
+
         // Create a bid transaction
         Transaction transaction = Transaction.builder()
                 .wallet(wallet)
@@ -173,14 +219,14 @@ public class WalletService {
                 .product(product)
                 .createdAt(LocalDateTime.now())
                 .build();
-        
+
         // Update wallet balance
         wallet.setBalance(wallet.getBalance().subtract(amount));
-        
+
         // Save transaction and wallet
         Transaction savedTransaction = transactionRepository.save(transaction);
         walletRepository.save(wallet);
-        
+
         return mapToTransactionResponse(savedTransaction);
     }
 
@@ -193,16 +239,16 @@ public class WalletService {
     public WalletResponse refundBid(Long transactionId) {
         Transaction transaction = transactionRepository.findById(transactionId)
                 .orElseThrow(() -> new AppException("Transaction not found", HttpStatus.NOT_FOUND));
-        
+
         // Verify this is a bid transaction
         if (transaction.getType() != TransactionType.BID) {
             throw new AppException("Not a bid transaction", HttpStatus.BAD_REQUEST);
         }
-        
+
         // Update transaction status
         transaction.setStatus(TransactionStatus.REFUNDED);
         transaction.setCompletedAt(LocalDateTime.now());
-        
+
         // Create a refund transaction
         Transaction refundTransaction = Transaction.builder()
                 .wallet(transaction.getWallet())
@@ -215,16 +261,16 @@ public class WalletService {
                 .createdAt(LocalDateTime.now())
                 .completedAt(LocalDateTime.now())
                 .build();
-        
+
         // Update wallet balance
         Wallet wallet = transaction.getWallet();
         wallet.setBalance(wallet.getBalance().add(transaction.getAmount()));
-        
+
         // Save transactions and wallet
         transactionRepository.save(transaction);
         transactionRepository.save(refundTransaction);
         walletRepository.save(wallet);
-        
+
         return mapToWalletResponse(wallet);
     }
 
@@ -236,7 +282,7 @@ public class WalletService {
     public List<TransactionResponse> getTransactionHistory() {
         Wallet wallet = getOrCreateWallet();
         List<Transaction> transactions = transactionRepository.findByWalletOrderByCreatedAtDesc(wallet);
-        
+
         return transactions.stream()
                 .map(this::mapToTransactionResponse)
                 .collect(Collectors.toList());
@@ -274,13 +320,81 @@ public class WalletService {
                 .createdAt(transaction.getCreatedAt())
                 .updatedAt(transaction.getUpdatedAt())
                 .completedAt(transaction.getCompletedAt());
-        
+
         // Add product information if available
         if (transaction.getProduct() != null) {
             builder.productId(transaction.getProduct().getId())
                    .productName(transaction.getProduct().getName());
         }
-        
+
         return builder.build();
+    }
+
+    /**
+     * Set or update the PIN for the user's wallet
+     * @param pin the new PIN
+     * @return the updated wallet response
+     */
+    @Transactional
+    public WalletResponse setPin(String pin) {
+        // Validate PIN format
+        validatePin(pin);
+
+        Wallet wallet = getOrCreateWallet();
+        wallet.setPin(pin);
+        wallet.setUpdatedAt(LocalDateTime.now());
+
+        Wallet updatedWallet = walletRepository.save(wallet);
+        return mapToWalletResponse(updatedWallet);
+    }
+
+    /**
+     * Verify if the provided PIN matches the wallet's PIN
+     * @param wallet the wallet to verify against
+     * @param pin the PIN to verify
+     * @throws AppException if the PIN is invalid or doesn't match
+     */
+    private void verifyPin(Wallet wallet, String pin) {
+        // Check if PIN is set
+        if (wallet.getPin() == null) {
+            throw new AppException("Wallet PIN not set. Please set a PIN first.", HttpStatus.BAD_REQUEST);
+        }
+
+        // Validate PIN format
+        validatePin(pin);
+
+        // Verify PIN
+        if (!wallet.getPin().equals(pin)) {
+            throw new AppException("Invalid PIN", HttpStatus.UNAUTHORIZED);
+        }
+    }
+
+    /**
+     * Validate the PIN format
+     * @param pin the PIN to validate
+     * @throws AppException if the PIN format is invalid
+     */
+    private void validatePin(String pin) {
+        if (pin == null || pin.isEmpty()) {
+            throw new AppException("PIN is required", HttpStatus.BAD_REQUEST);
+        }
+
+        if (pin.length() < 4 || pin.length() > 6) {
+            throw new AppException("PIN must be between 4 and 6 digits", HttpStatus.BAD_REQUEST);
+        }
+
+        if (!pin.matches("^[0-9]+$")) {
+            throw new AppException("PIN must contain only digits", HttpStatus.BAD_REQUEST);
+        }
+    }
+
+    /**
+     * Check if the wallet has a PIN set
+     * @return true if the wallet has a PIN set
+     */
+    @Transactional(readOnly = true)
+    public boolean hasPinSet() {
+        Wallet wallet = getOrCreateWallet();
+        return wallet.getPin() != null && !wallet.getPin().isEmpty();
     }
 }
