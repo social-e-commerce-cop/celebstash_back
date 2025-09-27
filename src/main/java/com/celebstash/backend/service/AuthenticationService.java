@@ -195,6 +195,11 @@ public class AuthenticationService {
         return otpService.sendOtp(identifier, OtpData.OtpType.PASSWORD_RESET, httpRequest);
     }
 
+    public boolean verifyPasswordResetOtp(OtpVerificationRequest request) {
+        // Verify OTP without consuming it (for password reset flow)
+        return otpService.verifyOtpWithoutConsuming(request.getIdentifier(), request.getOtp(), OtpData.OtpType.PASSWORD_RESET);
+    }
+
     @Transactional
     public boolean completePasswordReset(PasswordResetRequest request) {
         // Validate password match

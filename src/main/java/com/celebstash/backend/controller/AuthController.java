@@ -83,6 +83,17 @@ public class AuthController {
         return ResponseEntity.ok(new ApiResponse(true, "If an account exists, a password reset OTP has been sent"));
     }
 
+    @PostMapping("/password-reset/verify-otp")
+    @Operation(summary = "Verify password reset OTP", description = "Verifies OTP for password reset without changing password")
+    public ResponseEntity<ApiResponse> verifyPasswordResetOtp(@Valid @RequestBody OtpVerificationRequest request) {
+        boolean success = authenticationService.verifyPasswordResetOtp(request);
+        if (success) {
+            return ResponseEntity.ok(new ApiResponse(true, "OTP verified successfully"));
+        } else {
+            return ResponseEntity.badRequest().body(new ApiResponse(false, "Invalid or expired OTP"));
+        }
+    }
+
     @PostMapping("/password-reset/complete")
     @Operation(summary = "Complete password reset", description = "Verifies OTP and updates password")
     public ResponseEntity<ApiResponse> completePasswordReset(@Valid @RequestBody PasswordResetRequest request) {
