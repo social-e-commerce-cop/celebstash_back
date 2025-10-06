@@ -10,6 +10,8 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Data
 @Builder
@@ -32,7 +34,12 @@ public class Product {
     @Column(nullable = false)
     private BigDecimal price;
 
-    private String imageUrl;
+    @ElementCollection
+    @CollectionTable(name = "product_images", joinColumns = @JoinColumn(name = "product_id"))
+    @Column(name = "image_url")
+    private List<String> imageUrls = new ArrayList<>();
+
+    private String videoUrl;
 
     @Column(nullable = false)
     private Integer stockQuantity;
@@ -77,6 +84,10 @@ public class Product {
         createdAt = LocalDateTime.now();
         if (status == null) {
             status = ProductStatus.PENDING;
+        }
+        // Set initialBidPrice to price if not already set
+        if (initialBidPrice == null && price != null) {
+            initialBidPrice = price;
         }
     }
 

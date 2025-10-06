@@ -236,7 +236,8 @@ public class CartService {
                 .productId(product.getId())
                 .productName(product.getName())
                 .productDescription(product.getDescription())
-                .productImageUrl(product.getImageUrl())
+                .productImageUrl(product.getImageUrls() != null && !product.getImageUrls().isEmpty() ? 
+                        product.getImageUrls().get(0) : null)
                 .productPrice(product.getPrice())
                 .quantity(cartItem.getQuantity())
                 .subtotal(subtotal)

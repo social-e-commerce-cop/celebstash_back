@@ -9,6 +9,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -17,7 +18,7 @@ import java.util.List;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ProductRequest {
+public class ProductCreateRequest {
 
     @NotBlank(message = "Product name is required")
     @Size(min = 3, max = 100, message = "Product name must be between 3 and 100 characters")
@@ -31,9 +32,9 @@ public class ProductRequest {
     private BigDecimal price;
 
     @Size(min = 3, max = 5, message = "Product must have 3-5 images")
-    private List<String> imageUrls;
+    private List<MultipartFile> images;
 
-    private String videoUrl;
+    private MultipartFile video;
 
     @NotNull(message = "Stock quantity is required")
     @Min(value = 0, message = "Stock quantity must be greater than or equal to 0")
