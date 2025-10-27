@@ -39,6 +39,14 @@ public class JwtUtils {
         return extractClaim(token, Claims::getId);
     }
 
+    public String extractRole(String token) {
+        return extractClaim(token, claims -> claims.get("role", String.class));
+    }
+
+    public Long extractUserId(String token) {
+        return extractClaim(token, claims -> claims.get("userId", Long.class));
+    }
+
     public Date extractExpiration(String token) {
         return extractClaim(token, Claims::getExpiration);
     }
@@ -100,11 +108,25 @@ public class JwtUtils {
     }
 
     public String generateAccessToken(UserDetails userDetails) {
-        return generateToken(new HashMap<>(), userDetails, jwtAccessTokenExpiration);
+        Map<String, Object> claims = new HashMap<>();
+        // Add role to claims
+        if (userDetails instanceof com.celebstash.backend.model.User) {
+            com.celebstash.backend.model.User user = (com.celebstash.backend.model.User) userDetails;
+            claims.put("role", user.getRole().name());
+            claims.put("userId", user.getId());
+            claims.put("fullName", user.getFullName());
+        }
+        return generateToken(claims, userDetails, jwtAccessTokenExpiration);
     }
 
     public String generateRefreshToken(UserDetails userDetails) {
-        return generateToken(new HashMap<>(), userDetails, jwtRefreshTokenExpiration);
+        Map<String, Object> claims = new HashMap<>();
+        if (userDetails instanceof com.celebstash.backend.model.User) {
+            com.celebstash.backend.model.User user = (com.celebstash.backend.model.User) userDetails;
+            claims.put("role", user.getRole().name());
+            claims.put("userId", user.getId());
+        }
+        return generateToken(claims, userDetails, jwtRefreshTokenExpiration);
     }
 
     private String generateToken(Map<String, Object> extraClaims, UserDetails userDetails, long expiration) {
@@ -114,7 +136,7 @@ public class JwtUtils {
                 .setIssuedAt(new Date(System.currentTimeMillis()))
                 .setExpiration(new Date(System.currentTimeMillis() + expiration))
                 .setId(UUID.randomUUID().toString())
-                .signWith(getSigningKey(), SignatureAlgorithm.HS512) // Use HS512 here
+                .signWith(getSigningKey(), SignatureAlgorithm.HS512)
                 .compact();
     }
 

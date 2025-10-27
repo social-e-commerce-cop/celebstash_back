@@ -17,25 +17,27 @@ public class OpenApiConfig {
     public OpenAPI openAPI() {
         return new OpenAPI()
                 .info(new Info()
-                        .title("Authentication API")
-                        .description("Spring Boot REST API for Authentication and Authorization")
+                        .title("CelebStash API")
+                        .description("Spring Boot REST API for CelebStash - Celebrity Marketplace")
                         .version("1.0.0")
                         .contact(new Contact()
-                                .name("API Support")
+                                .name("CelebStash API Support")
                                 .url("https://www.celebstash.com")
                                 .email("support@celebstash.com"))
                         .license(new License()
                                 .name("Apache 2.0")
                                 .url("https://www.apache.org/licenses/LICENSE-2.0.html")))
-                .addSecurityItem(new SecurityRequirement().addList("Bearer Authentication"))
+                .addSecurityItem(new SecurityRequirement().addList("bearerAuth"))
                 .components(new Components()
-                        .addSecuritySchemes("Bearer Authentication", createAPIKeyScheme()));
+                        .addSecuritySchemes("bearerAuth", createAPIKeyScheme()));
     }
 
     private SecurityScheme createAPIKeyScheme() {
         return new SecurityScheme()
+                .name("bearerAuth")
                 .type(SecurityScheme.Type.HTTP)
                 .bearerFormat("JWT")
-                .scheme("bearer");
+                .scheme("bearer")
+                .description("Enter your JWT token in the format: your-token-here (without 'Bearer' prefix)");
     }
 }
