@@ -20,6 +20,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
 
+import com.celebstash.backend.dto.user.UserProfileUpdateRequest;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -120,5 +122,31 @@ public class UserService implements UserDetailsService {
 
         return userRepository.findByEmailOrPhoneNumber(username, username)
                 .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+    }
+
+    @Transactional
+    public User updateProfile(UserProfileUpdateRequest request) {
+        User currentUser = getCurrentUser();
+
+        if (request.getFullName() != null) {
+            currentUser.setFullName(request.getFullName());
+        }
+        if (request.getUsername() != null) {
+            currentUser.setUsername(request.getUsername());
+        }
+        if (request.getGender() != null) {
+            currentUser.setGender(request.getGender());
+        }
+        if (request.getBio() != null) {
+            currentUser.setBio(request.getBio());
+        }
+        if (request.getProfilePicture() != null) {
+            currentUser.setProfilePicture(request.getProfilePicture());
+        }
+        if (request.getFandomName() != null) {
+            currentUser.setFandomName(request.getFandomName());
+        }
+
+        return userRepository.save(currentUser);
     }
 }

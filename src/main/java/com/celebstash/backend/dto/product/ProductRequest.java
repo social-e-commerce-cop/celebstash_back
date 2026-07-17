@@ -11,6 +11,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 @Data
 @Builder
@@ -29,14 +30,14 @@ public class ProductRequest {
     @Min(value = 0, message = "Price must be greater than or equal to 0")
     private BigDecimal price;
 
-    private String imageUrl;
+    @Size(min = 3, max = 5, message = "Product must have 3-5 images")
+    private List<String> imageUrls;
+
+    private String videoUrl;
 
     @NotNull(message = "Stock quantity is required")
     @Min(value = 0, message = "Stock quantity must be greater than or equal to 0")
     private Integer stockQuantity;
 
     private ProductType productType = ProductType.REGULAR;
-
-    @Min(value = 0, message = "Initial bid price must be greater than or equal to 0")
-    private BigDecimal initialBidPrice;
 }

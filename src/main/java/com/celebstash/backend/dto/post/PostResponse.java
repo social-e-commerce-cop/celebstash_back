@@ -22,20 +22,23 @@ public class PostResponse {
     private String userImageUrl;
     private ProductResponse product;
     private String videoUrl;
-    private List<String> photoUrls;
+    private List<String> imageUrls;
     private String description;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-    
-    // Counts
-    private int likesCount;
-    private int commentsCount;
-    private int sharesCount;
-    
+
+    // Counts (changed from int -> long)
+    private long likesCount;
+    private long commentsCount;
+    private long sharesCount;
+
     // User interactions
     private boolean isLiked;
     private boolean isShared;
-    
+
     // Comments (optional, may be loaded separately)
     private List<CommentResponse> comments;
+
+    private boolean isSponsored;
+    private String sponsorName;
 }

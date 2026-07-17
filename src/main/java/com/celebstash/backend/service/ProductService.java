@@ -1,5 +1,6 @@
 package com.celebstash.backend.service;
 
+import com.celebstash.backend.dto.product.ProductCreateRequest;
 import com.celebstash.backend.dto.product.ProductRequest;
 import com.celebstash.backend.dto.product.ProductResponse;
 import com.celebstash.backend.dto.product.ProductStatusUpdateRequest;
@@ -12,6 +13,7 @@ import com.celebstash.backend.model.enums.Role;
 import com.celebstash.backend.repository.PostRepository;
 import com.celebstash.backend.repository.ProductRepository;
 import com.celebstash.backend.repository.UserRepository;
+import org.springframework.web.multipart.MultipartFile;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -30,29 +32,70 @@ public class ProductService {
     private final UserRepository userRepository;
     private final UserService userService;
     private final PostRepository postRepository;
+    private final FileStorageService fileStorageService;
 
     @Transactional
     public ProductResponse createProduct(ProductRequest request) {
         User currentUser = userService.getCurrentUser();
 
+        if (currentUser.getRole() != Role.ARTIST || !currentUser.isAccountVerified()) {
+            throw new AppException("Only verified creators are allowed to list products", HttpStatus.FORBIDDEN);
+        }
+
         Product.ProductBuilder productBuilder = Product.builder()
                 .name(request.getName())
                 .description(request.getDescription())
                 .price(request.getPrice())
-                .imageUrl(request.getImageUrl())
+                .imageUrls(request.getImageUrls())
+                .videoUrl(request.getVideoUrl())
                 .stockQuantity(request.getStockQuantity())
                 .status(ProductStatus.PENDING) // All new products start as PENDING
                 .productType(request.getProductType()) // Set product type from request
                 .seller(currentUser)
                 .createdAt(LocalDateTime.now());
 
-        // If it's a bidding product, set the initial bid price
-        if (request.getProductType() == ProductType.BIDDING) {
-            if (request.getInitialBidPrice() == null) {
-                throw new AppException("Initial bid price is required for bidding products", HttpStatus.BAD_REQUEST);
-            }
-            productBuilder.initialBidPrice(request.getInitialBidPrice());
+        // Initial bid price is automatically set to the product price in the Product entity's onCreate method
+
+        Product product = productBuilder.build();
+        Product savedProduct = productRepository.save(product);
+        return mapToProductResponse(savedProduct);
+    }
+
+    /**
+     * Create a product with file uploads
+     * @param request the product create request with file uploads
+     * @return the created product response
+     */
+    @Transactional
+    public ProductResponse createProductWithFiles(ProductCreateRequest request) {
+        User currentUser = userService.getCurrentUser();
+
+        if (currentUser.getRole() != Role.ARTIST || !currentUser.isAccountVerified()) {
+            throw new AppException("Only verified creators are allowed to list products", HttpStatus.FORBIDDEN);
         }
+
+        // Store image files
+        List<String> imageUrls = fileStorageService.storeFiles(request.getImages());
+
+        // Store video file if provided
+        String videoUrl = null;
+        if (request.getVideo() != null && !request.getVideo().isEmpty()) {
+            videoUrl = fileStorageService.storeFile(request.getVideo());
+        }
+
+        Product.ProductBuilder productBuilder = Product.builder()
+                .name(request.getName())
+                .description(request.getDescription())
+                .price(request.getPrice())
+                .imageUrls(imageUrls)
+                .videoUrl(videoUrl)
+                .stockQuantity(request.getStockQuantity())
+                .status(ProductStatus.PENDING) // All new products start as PENDING
+                .productType(request.getProductType()) // Set product type from request
+                .seller(currentUser)
+                .createdAt(LocalDateTime.now());
+
+        // Initial bid price is automatically set to the product price in the Product entity's onCreate method
 
         Product product = productBuilder.build();
         Product savedProduct = productRepository.save(product);
@@ -75,6 +118,9 @@ public class ProductService {
 
         if (request.getStatus() == ProductStatus.APPROVED) {
             product.setApprovedAt(LocalDateTime.now());
+            product.setAdminNotes(null); // Clear rejection notes on approval
+        } else if (request.getStatus() == ProductStatus.REJECTED) {
+            product.setAdminNotes(request.getRejectionReason());
         }
 
         Product updatedProduct = productRepository.save(product);
@@ -170,7 +216,8 @@ public class ProductService {
                 .name(product.getName())
                 .description(product.getDescription())
                 .price(product.getPrice())
-                .imageUrl(product.getImageUrl())
+                .imageUrls(product.getImageUrls())
+                .videoUrl(product.getVideoUrl())
                 .stockQuantity(product.getStockQuantity())
                 .status(product.getStatus())
                 .productType(product.getProductType())
@@ -179,6 +226,7 @@ public class ProductService {
                 .createdAt(product.getCreatedAt())
                 .updatedAt(product.getUpdatedAt())
                 .approvedAt(product.getApprovedAt())
+                .adminNotes(product.getAdminNotes())
                 .hasPost(false);
 
         // Check if a post exists for this product

@@ -1,107 +1,88 @@
-package com.celebstash.backend.model;
+    package com.celebstash.backend.model;
 
-import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+    import com.celebstash.backend.model.enums.PostStatus;
+    import jakarta.persistence.*;
+    import lombok.AllArgsConstructor;
+    import lombok.Builder;
+    import lombok.Data;
+    import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+    import java.time.LocalDateTime;
+    import java.util.ArrayList;
+    import java.util.List;
 
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-@Entity
-@Table(name = "posts")
-public class Post {
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Entity
+    @Table(name = "posts")
+    public class Post {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+        @Id
+        @GeneratedValue(strategy = GenerationType.IDENTITY)
+        private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
-    private User user;
+        @Column(length = 1000)
+        private String description;
 
-    @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "product_id", nullable = false)
-    private Product product;
+        @ElementCollection
+        @CollectionTable(name = "post_images", joinColumns = @JoinColumn(name = "post_id"))
+        @Column(name = "image_url")
+        private List<String> imageUrls = new ArrayList<>();
 
-    @Column(nullable = false)
-    private String videoUrl;
+        private String videoUrl;
 
-    @ElementCollection
-    @CollectionTable(name = "post_photos", joinColumns = @JoinColumn(name = "post_id"))
-    @Column(name = "photo_url", nullable = false)
-    private List<String> photoUrls = new ArrayList<>();
+        @ManyToOne(fetch = FetchType.LAZY)
+        @JoinColumn(name = "user_id", nullable = false)
+        private User user;
 
-    @Column(length = 2000)
-    private String description;
+        @OneToOne(fetch = FetchType.LAZY)
+        @JoinColumn(name = "product_id")
+        private Product product;
 
-    @Column(nullable = false)
-    private LocalDateTime createdAt;
+        @Builder.Default
+        private boolean isSponsored = false;
 
-    private LocalDateTime updatedAt;
+        private String sponsorName;
 
-    @OneToMany(mappedBy = "post", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<Comment> comments = new ArrayList<>();
+        @Enumerated(EnumType.STRING)
+        @Column(nullable = false)
+        private PostStatus status;
 
-    @ManyToMany
-    @JoinTable(
-        name = "post_likes",
-        joinColumns = @JoinColumn(name = "post_id"),
-        inverseJoinColumns = @JoinColumn(name = "user_id")
-    )
-    private Set<User> likedBy = new HashSet<>();
+        @Column(nullable = false)
+        private LocalDateTime createdAt;
 
-    @ManyToMany
-    @JoinTable(
-        name = "post_shares",
-        joinColumns = @JoinColumn(name = "post_id"),
-        inverseJoinColumns = @JoinColumn(name = "user_id")
-    )
-    private Set<User> sharedBy = new HashSet<>();
+        private LocalDateTime updatedAt;
 
-    @PrePersist
-    protected void onCreate() {
-        createdAt = LocalDateTime.now();
+        // Users who liked this post
+        @ManyToMany
+        @JoinTable(
+                name = "post_likes",
+                joinColumns = @JoinColumn(name = "post_id"),
+                inverseJoinColumns = @JoinColumn(name = "user_id")
+        )
+        private List<User> likedBy = new ArrayList<>();
+
+        // Users who shared this post
+        @ManyToMany
+        @JoinTable(
+                name = "post_shares",
+                joinColumns = @JoinColumn(name = "post_id"),
+                inverseJoinColumns = @JoinColumn(name = "user_id")
+        )
+        private List<User> sharedBy = new ArrayList<>();
+
+        @PrePersist
+        protected void onCreate() {
+            createdAt = LocalDateTime.now();
+            if (status == null) {
+                status = PostStatus.ACTIVE;
+            }
+        }
+
+        @PreUpdate
+        protected void onUpdate() {
+            updatedAt = LocalDateTime.now();
+        }
     }
-
-    @PreUpdate
-    protected void onUpdate() {
-        updatedAt = LocalDateTime.now();
-    }
-
-    public int getLikesCount() {
-        return likedBy.size();
-    }
-
-    public int getCommentsCount() {
-        return comments.size();
-    }
-
-    public int getSharesCount() {
-        return sharedBy.size();
-    }
-
-    public boolean isLikedBy(User user) {
-        return likedBy.contains(user);
-    }
-
-    public void addLike(User user) {
-        likedBy.add(user);
-    }
-
-    public void removeLike(User user) {
-        likedBy.remove(user);
-    }
-
-    public void addShare(User user) {
-        sharedBy.add(user);
-    }
-}

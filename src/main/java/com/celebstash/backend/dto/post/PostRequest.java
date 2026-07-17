@@ -1,7 +1,6 @@
 package com.celebstash.backend.dto.post;
 
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -16,15 +15,17 @@ import java.util.List;
 @AllArgsConstructor
 public class PostRequest {
 
-    @NotNull(message = "Product ID is required")
-    private Long productId;
+    @Size(max = 1000, message = "Description cannot exceed 1000 characters")
+    private String description;
 
-    @NotBlank(message = "Video URL is required")
+    @Size(min = 3, max = 5, message = "Post must have 3-5 images")
+    private List<String> imageUrls;
+
     private String videoUrl;
 
-    @Size(min = 3, max = 5, message = "Between 3 and 5 photos are required")
-    private List<String> photoUrls;
+    // Optional product ID if the post is for a product
+    private Long productId;
 
-    @Size(max = 2000, message = "Description cannot exceed 2000 characters")
-    private String description;
+    private boolean isSponsored;
+    private String sponsorName;
 }

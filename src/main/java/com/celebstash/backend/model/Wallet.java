@@ -28,6 +28,13 @@ public class Wallet {
     @Column(nullable = false)
     private BigDecimal balance;
 
+    @Column(nullable = false, precision = 38, scale = 2)
+    @Builder.Default
+    private BigDecimal heldBalance = BigDecimal.ZERO;
+
+    @Column(length = 6)
+    private String pin;
+
     @Column(nullable = false)
     private LocalDateTime createdAt;
 
@@ -38,6 +45,9 @@ public class Wallet {
         createdAt = LocalDateTime.now();
         if (balance == null) {
             balance = BigDecimal.ZERO;
+        }
+        if (heldBalance == null) {
+            heldBalance = BigDecimal.ZERO;
         }
     }
 
