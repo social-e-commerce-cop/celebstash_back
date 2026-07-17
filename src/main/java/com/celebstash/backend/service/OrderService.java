@@ -9,9 +9,11 @@ import com.celebstash.backend.exception.AppException;
 import com.celebstash.backend.model.*;
 import com.celebstash.backend.model.enums.DeliveryOption;
 import com.celebstash.backend.model.enums.OrderStatus;
-import com.celebstash.backend.repository.LocationRepository;
-import com.celebstash.backend.repository.OrderItemRepository;
-import com.celebstash.backend.repository.OrderRepository;
+import com.celebstash.backend.model.enums.ReservationStatus;
+import com.celebstash.backend.model.enums.TransactionStatus;
+import com.celebstash.backend.model.enums.TransactionType;
+import com.celebstash.backend.model.enums.NotificationType;
+import com.celebstash.backend.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -19,6 +21,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.Optional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -37,6 +41,11 @@ public class OrderService {
     private final CartService cartService;
     private final UserService userService;
     private final WalletService walletService;
+    private final WalletRepository walletRepository;
+    private final ReservationRepository reservationRepository;
+    private final TransactionRepository transactionRepository;
+    private final ProductRepository productRepository;
+    private final NotificationService notificationService;
 
     /**
      * Create a new order from the user's cart
@@ -144,15 +153,120 @@ public class OrderService {
         if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
             throw new AppException("Order is already paid or cancelled", HttpStatus.BAD_REQUEST);
         }
-        
-        // Process payment using wallet
-        walletService.deductFunds(order.getTotal(), null, pin);
+
+        User currentUser = order.getUser();
+        Wallet wallet = walletRepository.findByUser(currentUser)
+                .orElseThrow(() -> new AppException("Wallet not found", HttpStatus.NOT_FOUND));
+
+        if (wallet.getPin() == null || !wallet.getPin().equals(pin)) {
+            throw new AppException("Invalid PIN", HttpStatus.BAD_REQUEST);
+        }
+
+        // Find active reservations for the products in the order
+        List<OrderItem> orderItems = orderItemRepository.findByOrder(order);
+        BigDecimal totalHeldEscrow = BigDecimal.ZERO;
+        List<Reservation> activeReservations = new ArrayList<>();
+
+        for (OrderItem item : orderItems) {
+            Optional<Reservation> resOpt = reservationRepository.findByUserAndProductAndStatus(
+                    currentUser, item.getProduct(), ReservationStatus.PENDING
+            );
+            if (resOpt.isPresent()) {
+                Reservation res = resOpt.get();
+                totalHeldEscrow = totalHeldEscrow.add(res.getHeldAmount());
+                activeReservations.add(res);
+            }
+        }
+
+        BigDecimal remainingToPay = order.getTotal().subtract(totalHeldEscrow);
+        if (remainingToPay.compareTo(BigDecimal.ZERO) < 0) {
+            remainingToPay = BigDecimal.ZERO;
+        }
+
+        if (wallet.getBalance().compareTo(remainingToPay) < 0) {
+            throw new AppException("Insufficient balance. Remaining amount to pay is $" + remainingToPay.setScale(2, java.math.RoundingMode.HALF_UP), HttpStatus.BAD_REQUEST);
+        }
+
+        // Deduct remaining and release escrow
+        wallet.setBalance(wallet.getBalance().subtract(remainingToPay));
+        wallet.setHeldBalance(wallet.getHeldBalance().subtract(totalHeldEscrow));
+        walletRepository.save(wallet);
+
+        // Record payment transaction for buyer
+        Transaction paymentTx = Transaction.builder()
+                .wallet(wallet)
+                .amount(order.getTotal())
+                .type(TransactionType.PAYMENT)
+                .status(TransactionStatus.COMPLETED)
+                .description("Payment for Order " + order.getOrderNumber())
+                .createdAt(LocalDateTime.now())
+                .completedAt(LocalDateTime.now())
+                .build();
+        transactionRepository.save(paymentTx);
+
+        // Credit creators for each order item
+        for (OrderItem item : orderItems) {
+            Product product = productRepository.findByIdForUpdate(item.getProduct().getId())
+                    .orElse(item.getProduct());
+
+            User seller = product.getSeller();
+            Wallet sellerWallet = walletRepository.findByUser(seller)
+                    .orElseGet(() -> {
+                        Wallet newWallet = Wallet.builder()
+                                .user(seller)
+                                .balance(BigDecimal.ZERO)
+                                .createdAt(LocalDateTime.now())
+                                .build();
+                        return walletRepository.save(newWallet);
+                    });
+
+            BigDecimal itemTotalPrice = item.getPrice().multiply(BigDecimal.valueOf(item.getQuantity()));
+            sellerWallet.setBalance(sellerWallet.getBalance().add(itemTotalPrice));
+            walletRepository.save(sellerWallet);
+
+            // Record transaction for seller
+            Transaction sellerTx = Transaction.builder()
+                    .wallet(sellerWallet)
+                    .amount(itemTotalPrice)
+                    .type(TransactionType.DEPOSIT)
+                    .status(TransactionStatus.COMPLETED)
+                    .description("Payout for Product " + product.getName() + " in Order " + order.getOrderNumber())
+                    .product(product)
+                    .createdAt(LocalDateTime.now())
+                    .completedAt(LocalDateTime.now())
+                    .build();
+            transactionRepository.save(sellerTx);
+
+            // Notify seller
+            notificationService.createNotification(
+                    seller,
+                    "Product Purchased",
+                    "A customer has purchased " + item.getQuantity() + " unit(s) of " + product.getName() + ". Payout of $" + itemTotalPrice + " has been credited to your wallet.",
+                    NotificationType.ORDER_STATUS
+            );
+        }
+
+        // Mark reservations as completed
+        for (Reservation res : activeReservations) {
+            res.setStatus(ReservationStatus.COMPLETED);
+            res.setCompletedAt(LocalDateTime.now());
+            reservationRepository.save(res);
+        }
         
         // Update order status
         order.setStatus(OrderStatus.PAID);
         order.setPaidAt(LocalDateTime.now());
         
         Order updatedOrder = orderRepository.save(order);
+
+        // Notify buyer
+        notificationService.createNotification(
+                currentUser,
+                "Order Paid Successfully",
+                "Your payment of $" + order.getTotal() + " for order " + order.getOrderNumber() + " was processed successfully.",
+                NotificationType.ORDER_STATUS
+        );
+
         return mapToOrderResponse(updatedOrder);
     }
 

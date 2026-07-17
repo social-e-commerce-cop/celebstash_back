@@ -7,6 +7,7 @@ import com.celebstash.backend.exception.AppException;
 import com.celebstash.backend.model.*;
 import com.celebstash.backend.model.enums.LikeableType;
 import com.celebstash.backend.model.enums.PostStatus;
+import com.celebstash.backend.model.enums.Role;
 import com.celebstash.backend.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -31,6 +32,10 @@ public class PostService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
 
+        if (user.getRole() != Role.ARTIST || !user.isAccountVerified()) {
+            throw new AppException("Only verified creators are allowed to create posts", HttpStatus.FORBIDDEN);
+        }
+
         Product product = null;
         if (request.getProductId() != null) {
             product = productRepository.findById(request.getProductId())
@@ -43,6 +48,8 @@ public class PostService {
         post.setVideoUrl(request.getVideoUrl());
         post.setImageUrls(request.getImageUrls());
         post.setProduct(product);
+        post.setSponsored(request.isSponsored());
+        post.setSponsorName(request.getSponsorName());
         post.setStatus(PostStatus.ACTIVE);
         post.setCreatedAt(LocalDateTime.now());
 
@@ -188,6 +195,8 @@ public class PostService {
                 .createdAt(post.getCreatedAt())
                 .updatedAt(post.getUpdatedAt())
                 .product(post.getProduct() != null ? mapToProductResponse(post.getProduct()) : null)
+                .isSponsored(post.isSponsored())
+                .sponsorName(post.getSponsorName())
                 .build();
     }
 

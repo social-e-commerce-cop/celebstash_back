@@ -31,6 +31,7 @@ public class ProductResponse {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime approvedAt;
+    private String adminNotes;
 
     // Bidding related fields
     private BigDecimal initialBidPrice;

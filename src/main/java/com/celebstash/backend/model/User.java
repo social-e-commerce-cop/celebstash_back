@@ -74,6 +74,8 @@ public class User implements UserDetails {
 
     private LocalDateTime accountVerifiedAt;
 
+    private String fandomName;
+
     @PrePersist
     @PreUpdate
     private void updateAccountVerifiedAt() {

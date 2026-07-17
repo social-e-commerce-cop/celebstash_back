@@ -31,6 +31,10 @@ public class CartItem {
     @Column(nullable = false)
     private Integer quantity;
 
+    @OneToOne(fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    @JoinColumn(name = "reservation_id")
+    private Reservation reservation;
+
     @Column(nullable = false)
     private LocalDateTime addedAt;
 

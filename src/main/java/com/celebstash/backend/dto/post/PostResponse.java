@@ -38,4 +38,7 @@ public class PostResponse {
 
     // Comments (optional, may be loaded separately)
     private List<CommentResponse> comments;
+
+    private boolean isSponsored;
+    private String sponsorName;
 }

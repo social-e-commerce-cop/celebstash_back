@@ -41,6 +41,11 @@
         @JoinColumn(name = "product_id")
         private Product product;
 
+        @Builder.Default
+        private boolean isSponsored = false;
+
+        private String sponsorName;
+
         @Enumerated(EnumType.STRING)
         @Column(nullable = false)
         private PostStatus status;

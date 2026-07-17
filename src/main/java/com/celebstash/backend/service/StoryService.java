@@ -7,6 +7,7 @@ import com.celebstash.backend.exception.AppException;
 import com.celebstash.backend.model.Product;
 import com.celebstash.backend.model.Story;
 import com.celebstash.backend.model.User;
+import com.celebstash.backend.model.enums.Role;
 import com.celebstash.backend.repository.ProductRepository;
 import com.celebstash.backend.repository.StoryRepository;
 import com.celebstash.backend.repository.UserRepository;
@@ -39,6 +40,10 @@ public class StoryService {
     @Transactional
     public StoryResponse createStory(StoryRequest request) {
         User currentUser = userService.getCurrentUser();
+
+        if (currentUser.getRole() != Role.ARTIST || !currentUser.isAccountVerified()) {
+            throw new AppException("Only verified creators are allowed to post stories", HttpStatus.FORBIDDEN);
+        }
 
         Story.StoryBuilder storyBuilder = Story.builder()
                 .user(currentUser)

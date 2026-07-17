@@ -49,8 +49,26 @@ public class BidService {
         if (product.getBidEndTime() != null && product.getBidEndTime().isBefore(LocalDateTime.now()))
             throw new AppException("Bidding has ended for this product", HttpStatus.BAD_REQUEST);
 
+        // Determine the current price threshold
+        BigDecimal currentPrice = product.getCurrentBidPrice() != null ? product.getCurrentBidPrice() : product.getInitialBidPrice();
+        if (currentPrice == null) {
+            currentPrice = product.getPrice();
+        }
+
+        // Calculate minimum required increment: max of $5.00 or 5% of current price
+        BigDecimal minIncrement = currentPrice.multiply(new BigDecimal("0.05"));
+        BigDecimal flatMinIncrement = new BigDecimal("5.00");
+        if (minIncrement.compareTo(flatMinIncrement) < 0) {
+            minIncrement = flatMinIncrement;
+        }
+
+        BigDecimal minRequiredBid = currentPrice.add(minIncrement);
+        if (request.getBidAmount().compareTo(minRequiredBid) < 0) {
+            throw new AppException("Bid amount must be at least $" + minRequiredBid.setScale(2, java.math.RoundingMode.HALF_UP) + " (minimum increment is $" + minIncrement.setScale(2, java.math.RoundingMode.HALF_UP) + ")", HttpStatus.BAD_REQUEST);
+        }
+
         // If there is a previous bidder, refund them
-        if (product.getCurrentBidder() != null && !product.getCurrentBidder().getId().equals(currentUser.getId())) {
+        if (product.getCurrentBidder() != null) {
             walletService.refundReservedFunds(product.getCurrentBidder().getId(), product.getCurrentBidPrice());
         }
 
@@ -64,6 +82,13 @@ public class BidService {
         if (product.getBidStartTime() == null) {
             product.setBidStartTime(LocalDateTime.now());
             product.setBidEndTime(LocalDateTime.now().plusHours(24));
+        } else {
+            // Anti-sniping: extend by 2 minutes if bid lands in the final 60 seconds of the auction
+            LocalDateTime bidEndTime = product.getBidEndTime();
+            if (bidEndTime != null && LocalDateTime.now().isAfter(bidEndTime.minusMinutes(1))) {
+                product.setBidEndTime(bidEndTime.plusMinutes(2));
+                log.info("Anti-sniping triggered. Bid end time extended for product: {}", product.getId());
+            }
         }
 
         Product updatedProduct = productRepository.save(product);

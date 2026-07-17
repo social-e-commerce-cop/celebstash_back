@@ -1,5 +1,6 @@
 package com.celebstash.backend.controller;
 
+import com.celebstash.backend.dto.wallet.MomoTopUpRequest;
 import com.celebstash.backend.dto.wallet.SetPinRequest;
 import com.celebstash.backend.dto.wallet.TopUpRequest;
 import com.celebstash.backend.dto.wallet.TransactionResponse;
@@ -36,6 +37,13 @@ public class WalletController {
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<WalletResponse> topUpWallet(@Valid @RequestBody TopUpRequest request) {
         return ResponseEntity.ok(walletService.topUpWallet(request));
+    }
+
+    @PostMapping("/top-up/momo")
+    @Operation(summary = "Top up wallet using Mobile Money", description = "Simulates Rwanda MTN MoMo/Airtel Money payment request and credits the user's wallet")
+    @SecurityRequirement(name = "bearerAuth")
+    public ResponseEntity<WalletResponse> topUpWithMomo(@Valid @RequestBody MomoTopUpRequest request) {
+        return ResponseEntity.ok(walletService.topUpWithMomo(request));
     }
 
     @GetMapping("/transactions")

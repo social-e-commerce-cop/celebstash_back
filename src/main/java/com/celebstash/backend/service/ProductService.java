@@ -38,6 +38,10 @@ public class ProductService {
     public ProductResponse createProduct(ProductRequest request) {
         User currentUser = userService.getCurrentUser();
 
+        if (currentUser.getRole() != Role.ARTIST || !currentUser.isAccountVerified()) {
+            throw new AppException("Only verified creators are allowed to list products", HttpStatus.FORBIDDEN);
+        }
+
         Product.ProductBuilder productBuilder = Product.builder()
                 .name(request.getName())
                 .description(request.getDescription())
@@ -65,6 +69,10 @@ public class ProductService {
     @Transactional
     public ProductResponse createProductWithFiles(ProductCreateRequest request) {
         User currentUser = userService.getCurrentUser();
+
+        if (currentUser.getRole() != Role.ARTIST || !currentUser.isAccountVerified()) {
+            throw new AppException("Only verified creators are allowed to list products", HttpStatus.FORBIDDEN);
+        }
 
         // Store image files
         List<String> imageUrls = fileStorageService.storeFiles(request.getImages());
@@ -110,6 +118,9 @@ public class ProductService {
 
         if (request.getStatus() == ProductStatus.APPROVED) {
             product.setApprovedAt(LocalDateTime.now());
+            product.setAdminNotes(null); // Clear rejection notes on approval
+        } else if (request.getStatus() == ProductStatus.REJECTED) {
+            product.setAdminNotes(request.getRejectionReason());
         }
 
         Product updatedProduct = productRepository.save(product);
@@ -215,6 +226,7 @@ public class ProductService {
                 .createdAt(product.getCreatedAt())
                 .updatedAt(product.getUpdatedAt())
                 .approvedAt(product.getApprovedAt())
+                .adminNotes(product.getAdminNotes())
                 .hasPost(false);
 
         // Check if a post exists for this product

@@ -79,6 +79,9 @@ public class Product {
 
     private LocalDateTime approvedAt;
 
+    @Column(length = 1000)
+    private String adminNotes;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();

@@ -25,4 +25,7 @@ public class PostRequest {
 
     // Optional product ID if the post is for a product
     private Long productId;
+
+    private boolean isSponsored;
+    private String sponsorName;
 }

@@ -1,5 +1,6 @@
 package com.celebstash.backend.service;
 
+import com.celebstash.backend.dto.wallet.MomoTopUpRequest;
 import com.celebstash.backend.dto.wallet.TopUpRequest;
 import com.celebstash.backend.dto.wallet.TransactionResponse;
 import com.celebstash.backend.dto.wallet.WalletResponse;
@@ -33,6 +34,7 @@ public class WalletService {
     private final TransactionRepository transactionRepository;
     private final ProductRepository productRepository;
     private final UserService userService;
+    private final MomoGatewayService momoGatewayService;
 
     /** Get or create wallet for current user */
     @Transactional
@@ -76,6 +78,38 @@ public class WalletService {
         return mapToWalletResponse(wallet);
     }
 
+    /** Top up wallet with Mobile Money */
+    @Transactional
+    public WalletResponse topUpWithMomo(MomoTopUpRequest request) {
+        Wallet wallet = getOrCreateWallet();
+
+        // Call Momo Gateway Mock
+        MomoGatewayService.MomoTransactionResponse momoRes = momoGatewayService.initiatePayment(
+                request.getPhoneNumber(), request.getAmount(), request.getProvider()
+        );
+
+        if (!"SUCCESS".equals(momoRes.getStatus())) {
+            throw new AppException("Mobile Money transaction failed: " + momoRes.getMessage(), HttpStatus.BAD_REQUEST);
+        }
+
+        wallet.setBalance(wallet.getBalance().add(request.getAmount()));
+        wallet.setUpdatedAt(LocalDateTime.now());
+        walletRepository.save(wallet);
+
+        Transaction transaction = Transaction.builder()
+                .wallet(wallet)
+                .amount(request.getAmount())
+                .type(TransactionType.DEPOSIT)
+                .status(TransactionStatus.COMPLETED)
+                .description("Mobile Money Deposit (" + request.getProvider() + ") ref: " + momoRes.getTransactionId())
+                .createdAt(LocalDateTime.now())
+                .completedAt(LocalDateTime.now())
+                .build();
+
+        transactionRepository.save(transaction);
+        return mapToWalletResponse(wallet);
+    }
+
     /** Check if wallet has sufficient balance */
     @Transactional(readOnly = true)
     public boolean hasSufficientBalance(BigDecimal amount) {
@@ -94,6 +128,7 @@ public class WalletService {
                 .orElseThrow(() -> new AppException("Product not found", HttpStatus.NOT_FOUND));
 
         wallet.setBalance(wallet.getBalance().subtract(amount));
+        wallet.setHeldBalance(wallet.getHeldBalance().add(amount));
 
         Transaction transaction = Transaction.builder()
                 .wallet(wallet)
@@ -129,6 +164,7 @@ public class WalletService {
         // Refund wallet
         Wallet wallet = transaction.getWallet();
         wallet.setBalance(wallet.getBalance().add(transaction.getAmount()));
+        wallet.setHeldBalance(wallet.getHeldBalance().subtract(transaction.getAmount()));
         wallet.setUpdatedAt(LocalDateTime.now());
         walletRepository.save(wallet);
 
@@ -197,6 +233,7 @@ public class WalletService {
                 .orElseThrow(() -> new AppException("Wallet not found for user " + userId, HttpStatus.NOT_FOUND));
 
         wallet.setBalance(wallet.getBalance().add(amount));
+        wallet.setHeldBalance(wallet.getHeldBalance().subtract(amount));
         wallet.setUpdatedAt(LocalDateTime.now());
 
         Transaction refundTransaction = Transaction.builder()
@@ -213,6 +250,51 @@ public class WalletService {
         walletRepository.save(wallet);
 
         return mapToWalletResponse(wallet);
+    }
+
+    @Transactional
+    public void completeBidPayout(Long winnerUserId, Long sellerUserId, BigDecimal amount, Long productId) {
+        Wallet winnerWallet = walletRepository.findByUserId(winnerUserId)
+                .orElseThrow(() -> new AppException("Winner wallet not found", HttpStatus.NOT_FOUND));
+        
+        // Deduct winner's held balance
+        winnerWallet.setHeldBalance(winnerWallet.getHeldBalance().subtract(amount));
+        walletRepository.save(winnerWallet);
+
+        // Find the product
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new AppException("Product not found", HttpStatus.NOT_FOUND));
+
+        // Credit creator wallet minus 5% platform commission
+        BigDecimal platformCommission = amount.multiply(new BigDecimal("0.05"));
+        BigDecimal sellerPayout = amount.subtract(platformCommission);
+
+        Wallet sellerWallet = walletRepository.findByUserId(sellerUserId)
+                .orElseGet(() -> {
+                    User seller = product.getSeller();
+                    Wallet newWallet = Wallet.builder()
+                            .user(seller)
+                            .balance(BigDecimal.ZERO)
+                            .createdAt(LocalDateTime.now())
+                            .build();
+                    return walletRepository.save(newWallet);
+                });
+
+        sellerWallet.setBalance(sellerWallet.getBalance().add(sellerPayout));
+        walletRepository.save(sellerWallet);
+
+        // Create deposit transaction for seller
+        Transaction sellerTx = Transaction.builder()
+                .wallet(sellerWallet)
+                .amount(sellerPayout)
+                .type(TransactionType.DEPOSIT)
+                .status(TransactionStatus.COMPLETED)
+                .description("Payout for won auction: " + product.getName() + " (minus 5% platform fee)")
+                .product(product)
+                .createdAt(LocalDateTime.now())
+                .completedAt(LocalDateTime.now())
+                .build();
+        transactionRepository.save(sellerTx);
     }
 
 
@@ -261,6 +343,7 @@ public class WalletService {
                 .userId(wallet.getUser().getId())
                 .userName(wallet.getUser().getFullName())
                 .balance(wallet.getBalance())
+                .heldBalance(wallet.getHeldBalance())
                 .createdAt(wallet.getCreatedAt())
                 .updatedAt(wallet.getUpdatedAt())
                 .build();

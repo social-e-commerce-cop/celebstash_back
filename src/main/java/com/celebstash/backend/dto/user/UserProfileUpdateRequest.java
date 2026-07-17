@@ -25,4 +25,6 @@ public class UserProfileUpdateRequest {
     private String bio;
 
     private String profilePicture;
+
+    private String fandomName;
 }

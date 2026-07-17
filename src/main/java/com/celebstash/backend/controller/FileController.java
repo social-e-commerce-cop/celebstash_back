@@ -1,9 +1,11 @@
 package com.celebstash.backend.controller;
 
 import com.celebstash.backend.service.FileStorageService;
+import com.celebstash.backend.util.UrlSigner;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -22,6 +24,7 @@ import java.util.stream.Collectors;
 public class FileController {
 
     private final FileStorageService fileStorageService;
+    private final UrlSigner urlSigner;
 
     @PostMapping("/upload")
     public ResponseEntity<String> uploadFile(@RequestParam("file") MultipartFile file) {
@@ -72,6 +75,36 @@ public class FileController {
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(contentType))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + resource.getFilename() + "\"")
+                .body(resource);
+    }
+
+    @GetMapping("/stream/{fileName:.+}")
+    public ResponseEntity<Resource> streamFile(
+            @PathVariable String fileName,
+            @RequestParam("token") String token,
+            @RequestParam("expires") Long expires,
+            HttpServletRequest request) {
+
+        String path = "/api/files/stream/" + fileName;
+        if (!urlSigner.verifySignature(path, expires, token)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
+        Resource resource = fileStorageService.loadFileAsResource(fileName);
+        String contentType = null;
+        try {
+            contentType = request.getServletContext().getMimeType(resource.getFile().getAbsolutePath());
+        } catch (IOException ex) {
+            System.out.println("Could not determine file type.");
+        }
+
+        if (contentType == null) {
+            contentType = "application/octet-stream";
+        }
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + resource.getFilename() + "\"")
                 .body(resource);
     }
 }
