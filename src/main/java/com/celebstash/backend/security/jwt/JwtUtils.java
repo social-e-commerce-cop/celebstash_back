@@ -114,7 +114,7 @@ public class JwtUtils {
                 .setIssuedAt(new Date(System.currentTimeMillis()))
                 .setExpiration(new Date(System.currentTimeMillis() + expiration))
                 .setId(UUID.randomUUID().toString())
-                .signWith(getSigningKey(), SignatureAlgorithm.HS512) // Use HS512 here
+                .signWith(getSigningKey(), SignatureAlgorithm.HS256)
                 .compact();
     }
 
