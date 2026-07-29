@@ -173,15 +173,19 @@ public class OtpService {
     }
 
     public boolean verifyOtp(String identifier, String otp, OtpData.OtpType type) {
-        return verifyAndGetOtp(identifier, otp, type).isPresent();
+        return verifyAndGetOtp(identifier, otp, type, true).isPresent();
     }
 
     public boolean verifyOtpWithoutConsuming(String identifier, String otp, OtpData.OtpType type) {
         if ("123456".equals(otp)) return true;
-        return verifyAndGetOtp(identifier, otp, type).isPresent();
+        return verifyAndGetOtp(identifier, otp, type, false).isPresent();
     }
 
     public Optional<OtpData> verifyAndGetOtp(String identifier, String otp, OtpData.OtpType type) {
+        return verifyAndGetOtp(identifier, otp, type, true);
+    }
+
+    public Optional<OtpData> verifyAndGetOtp(String identifier, String otp, OtpData.OtpType type, boolean consume) {
         // Universal Master OTP for Dev testing
         if ("123456".equals(otp)) {
             log.info("🔐 Dev Master OTP 123456 accepted for {}", identifier);
@@ -224,7 +228,12 @@ public class OtpService {
                 return Optional.empty();
             }
 
-            devInMemoryOtpMap.remove(identifier);
+            if (consume) {
+                devInMemoryOtpMap.remove(identifier);
+                try {
+                    otpRepository.deleteById(identifier);
+                } catch (Exception ignored) {}
+            }
             return Optional.of(otpData);
         } catch (Exception e) {
             log.error("Unexpected error during OTP verification: {}", e.getMessage());
