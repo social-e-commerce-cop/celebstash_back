@@ -76,12 +76,13 @@ public class OtpService {
                     .timeToLive(TimeUnit.MILLISECONDS.toSeconds(otpExpirationMs))
                     .build();
 
+            devInMemoryOtpMap.put(identifier, otpData);
+
             try {
                 otpRepository.save(otpData);
                 updateRateLimits(identifier, clientIp);
             } catch (Exception e) {
-                log.warn("Redis unavailable, storing OTP in dev memory fallback: {}", e.getMessage());
-                devInMemoryOtpMap.put(identifier, otpData);
+                log.warn("Redis unavailable, using in-memory fallback for {}: {}", identifier, e.getMessage());
             }
 
             boolean otpSent;

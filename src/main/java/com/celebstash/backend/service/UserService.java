@@ -36,20 +36,33 @@ public class UserService implements UserDetailsService {
 
     @Transactional
     public User createUser(String fullName, String identifier, String password, boolean isEmail) {
-        User user = User.builder()
-                .fullName(fullName)
-                .password(passwordEncoder.encode(password))
-                .role(Role.USER)
-                .provider(AuthProvider.LOCAL)
-                .status(AccountStatus.PENDING)
-                .build();
-
-        if (isEmail) {
-            user.setEmail(identifier);
-            user.setEmailVerified(false);
+        Optional<User> existingOpt = isEmail ? userRepository.findByEmail(identifier) : userRepository.findByPhoneNumber(identifier);
+        
+        User user;
+        if (existingOpt.isPresent()) {
+            user = existingOpt.get();
+            if (fullName != null && !fullName.isBlank()) {
+                user.setFullName(fullName);
+            }
+            if (password != null && !password.isBlank()) {
+                user.setPassword(passwordEncoder.encode(password));
+            }
         } else {
-            user.setPhoneNumber(identifier);
-            user.setPhoneVerified(false);
+            user = User.builder()
+                    .fullName(fullName)
+                    .password(passwordEncoder.encode(password))
+                    .role(Role.USER)
+                    .provider(AuthProvider.LOCAL)
+                    .status(AccountStatus.PENDING)
+                    .build();
+
+            if (isEmail) {
+                user.setEmail(identifier);
+                user.setEmailVerified(false);
+            } else {
+                user.setPhoneNumber(identifier);
+                user.setPhoneVerified(false);
+            }
         }
 
         return userRepository.save(user);
