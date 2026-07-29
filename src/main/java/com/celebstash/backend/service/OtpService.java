@@ -125,17 +125,21 @@ public class OtpService {
         return identifier.contains("@");
     }
 
+    @Value("${spring.mail.username:noreply@celebstash.com}")
+    private String mailFrom;
+
     private boolean sendEmailOtp(String email, String otp, OtpData.OtpType type) {
         try {
             SimpleMailMessage message = new SimpleMailMessage();
+            message.setFrom(mailFrom);
             message.setTo(email);
             message.setSubject(getSubject(type));
             message.setText(getEmailBody(otp, type));
             emailSender.send(message);
-            log.info("OTP email sent successfully to: {}", email);
+            log.info("OTP email sent successfully from {} to {}", mailFrom, email);
             return true;
         } catch (Exception e) {
-            log.warn("Dev mode: Real email send bypassed for {} (No live SMTP). Use OTP code logged above or 123456", email);
+            log.error("Failed to send OTP email via SMTP: {}", e.getMessage(), e);
             return true;
         }
     }
