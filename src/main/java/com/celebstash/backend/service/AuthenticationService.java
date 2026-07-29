@@ -186,9 +186,8 @@ public class AuthenticationService {
         // Check if user exists
         Optional<User> userOpt = userService.findByEmailOrPhoneNumber(identifier);
         if (userOpt.isEmpty()) {
-            // For security, don't reveal if user exists
-            log.info("Password reset requested for non-existent user: {}", identifier);
-            return true;
+            log.warn("Password reset requested for non-existent user: {}", identifier);
+            throw new IllegalArgumentException("No account found with this email or phone number.");
         }
 
         // Send OTP
