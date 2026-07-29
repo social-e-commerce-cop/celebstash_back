@@ -204,20 +204,20 @@ public class AuthenticationService {
         // Validate password match
         if (!Objects.equals(request.getNewPassword(), request.getConfirmPassword())) {
             log.warn("Password mismatch during reset for identifier: {}", request.getIdentifier());
-            return false;
+            throw new IllegalArgumentException("Passwords do not match.");
         }
 
         // Verify OTP
         if (!otpService.verifyOtp(request.getIdentifier(), request.getOtp(), OtpData.OtpType.PASSWORD_RESET)) {
             log.warn("Invalid OTP during password reset for identifier: {}", request.getIdentifier());
-            return false;
+            throw new IllegalArgumentException("Invalid or expired reset code.");
         }
 
         // Find user
         Optional<User> userOpt = userService.findByEmailOrPhoneNumber(request.getIdentifier());
         if (userOpt.isEmpty()) {
             log.warn("User not found during password reset: {}", request.getIdentifier());
-            return false;
+            throw new IllegalArgumentException("No user found with this email or phone number.");
         }
 
         User user = userOpt.get();
