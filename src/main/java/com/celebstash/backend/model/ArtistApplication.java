@@ -34,6 +34,7 @@ public class ArtistApplication {
     @Column(columnDefinition = "TEXT")
     private String bio;
 
+    @Column(columnDefinition = "TEXT")
     private String socialProofLink;
 
     @Enumerated(EnumType.STRING)

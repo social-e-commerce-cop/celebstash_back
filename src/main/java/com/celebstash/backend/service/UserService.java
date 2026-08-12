@@ -134,4 +134,13 @@ public class UserService implements UserDetailsService {
         return userRepository.findByEmailOrPhoneNumber(username, username)
                 .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
     }
+
+    public User getUserFromPrincipal(java.security.Principal principal) {
+        if (principal == null) {
+            return getCurrentUser();
+        }
+        String identifier = principal.getName();
+        return userRepository.findByEmailOrPhoneNumber(identifier, identifier)
+                .orElseGet(this::getCurrentUser);
+    }
 }

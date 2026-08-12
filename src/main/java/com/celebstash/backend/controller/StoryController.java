@@ -1,67 +1,90 @@
 package com.celebstash.backend.controller;
 
-import com.celebstash.backend.dto.story.StoryRequest;
-import com.celebstash.backend.dto.story.StoryResponse;
+import com.celebstash.backend.dto.StoryRequest;
+import com.celebstash.backend.dto.StoryResponse;
+import com.celebstash.backend.model.User;
 import com.celebstash.backend.service.StoryService;
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.security.SecurityRequirement;
-import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.validation.Valid;
+import com.celebstash.backend.service.UserService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.security.Principal;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/stories")
 @RequiredArgsConstructor
-@Tag(name = "Stories", description = "Story management APIs")
+@CrossOrigin(origins = "*")
 public class StoryController {
 
     private final StoryService storyService;
+    private final UserService userService;
 
     @PostMapping
-    @Operation(summary = "Create a new story", description = "Creates a new story with the provided details")
-    @SecurityRequirement(name = "bearerAuth")
-    public ResponseEntity<StoryResponse> createStory(@Valid @RequestBody StoryRequest request) {
-        return new ResponseEntity<>(storyService.createStory(request), HttpStatus.CREATED);
+    public ResponseEntity<StoryResponse> createStory(@RequestBody StoryRequest request, Principal principal) {
+        User user = userService.getUserFromPrincipal(principal);
+        return ResponseEntity.ok(storyService.createStory(user, request));
     }
 
-    @GetMapping
-    @Operation(summary = "Get all active stories", description = "Returns all active (non-expired) stories")
-    @SecurityRequirement(name = "bearerAuth")
-    public ResponseEntity<List<StoryResponse>> getActiveStories() {
-        return ResponseEntity.ok(storyService.getActiveStories());
+    @GetMapping("/feed")
+    public ResponseEntity<List<StoryResponse>> getFeedStories(Principal principal) {
+        User currentUser = principal != null ? userService.getUserFromPrincipal(principal) : null;
+        return ResponseEntity.ok(storyService.getActiveFeedStories(currentUser));
     }
 
     @GetMapping("/user/{userId}")
-    @Operation(summary = "Get active stories by user", description = "Returns all active stories by a specific user")
-    @SecurityRequirement(name = "bearerAuth")
-    public ResponseEntity<List<StoryResponse>> getActiveStoriesByUser(@PathVariable Long userId) {
-        return ResponseEntity.ok(storyService.getActiveStoriesByUser(userId));
+    public ResponseEntity<List<StoryResponse>> getUserActiveStories(@PathVariable Long userId, Principal principal) {
+        User currentUser = principal != null ? userService.getUserFromPrincipal(principal) : null;
+        return ResponseEntity.ok(storyService.getUserActiveStories(userId, currentUser));
     }
 
-    @GetMapping("/{id}")
-    @Operation(summary = "Get story by ID", description = "Returns a story by its ID and marks it as viewed")
-    @SecurityRequirement(name = "bearerAuth")
-    public ResponseEntity<StoryResponse> getStoryById(@PathVariable("id") Long storyId) {
-        return ResponseEntity.ok(storyService.getStoryById(storyId));
+    @PostMapping("/{storyId}/view")
+    public ResponseEntity<Map<String, String>> recordView(
+            @PathVariable Long storyId,
+            @RequestBody(required = false) Map<String, Object> body,
+            Principal principal) {
+        User viewer = userService.getUserFromPrincipal(principal);
+        double duration = body != null && body.containsKey("watchDuration") ? Double.parseDouble(body.get("watchDuration").toString()) : 5.0;
+        boolean completed = body != null && body.containsKey("completed") && Boolean.parseBoolean(body.get("completed").toString());
+
+        storyService.recordStoryView(storyId, viewer, duration, completed);
+        return ResponseEntity.ok(Map.of("message", "View recorded"));
     }
 
-    @GetMapping("/unviewed")
-    @Operation(summary = "Get unviewed stories", description = "Returns all active stories not viewed by the current user")
-    @SecurityRequirement(name = "bearerAuth")
-    public ResponseEntity<List<StoryResponse>> getUnviewedStories() {
-        return ResponseEntity.ok(storyService.getUnviewedStories());
+    @PostMapping("/{storyId}/react")
+    public ResponseEntity<Map<String, String>> reactToStory(
+            @PathVariable Long storyId,
+            @RequestBody Map<String, String> body,
+            Principal principal) {
+        User user = userService.getUserFromPrincipal(principal);
+        String emoji = body.getOrDefault("emoji", "❤️");
+        storyService.reactToStory(storyId, user, emoji);
+        return ResponseEntity.ok(Map.of("message", "Reaction recorded"));
     }
 
-    @DeleteMapping("/{id}")
-    @Operation(summary = "Delete story", description = "Deletes a story (only the creator can delete their own stories)")
-    @SecurityRequirement(name = "bearerAuth")
-    public ResponseEntity<Void> deleteStory(@PathVariable("id") Long storyId) {
-        storyService.deleteStory(storyId);
-        return ResponseEntity.noContent().build();
+    @PostMapping("/{storyId}/reply")
+    public ResponseEntity<Map<String, String>> replyToStory(
+            @PathVariable Long storyId,
+            @RequestBody Map<String, String> body,
+            Principal principal) {
+        User user = userService.getUserFromPrincipal(principal);
+        String message = body.getOrDefault("message", "");
+        storyService.replyToStory(storyId, user, message);
+        return ResponseEntity.ok(Map.of("message", "Reply sent successfully"));
+    }
+
+    @DeleteMapping("/{storyId}")
+    public ResponseEntity<Map<String, String>> deleteStory(@PathVariable Long storyId, Principal principal) {
+        User user = userService.getUserFromPrincipal(principal);
+        storyService.deleteStory(storyId, user);
+        return ResponseEntity.ok(Map.of("message", "Story deleted successfully"));
+    }
+
+    @GetMapping("/archive")
+    public ResponseEntity<List<StoryResponse>> getArchive(Principal principal) {
+        User user = userService.getUserFromPrincipal(principal);
+        return ResponseEntity.ok(storyService.getUserArchivedStories(user));
     }
 }

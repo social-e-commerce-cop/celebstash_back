@@ -31,6 +31,9 @@ public class User implements UserDetails {
     private String fullName;
 
     @Column(unique = true)
+    private String username;
+
+    @Column(unique = true)
     private String email;
 
     @Column(unique = true)
@@ -38,6 +41,8 @@ public class User implements UserDetails {
 
     @Column(nullable = false)
     private String password;
+
+    private String profilePicture;
 
     @Enumerated(EnumType.STRING)
     private AuthProvider provider;
@@ -60,8 +65,8 @@ public class User implements UserDetails {
 
     @Override
     public String getUsername() {
-        // Use email or phone as the username
-        return email != null ? email : phoneNumber;
+        // Return username registered by user, or fallback to email/phoneNumber
+        return username != null ? username : (email != null ? email : phoneNumber);
     }
 
     @Override

@@ -239,6 +239,8 @@ public class AuthenticationService {
                 .expiresIn(jwtUtils.extractExpiration(accessToken).getTime() - System.currentTimeMillis())
                 .userId(user.getId().toString())
                 .fullName(user.getFullName())
+                .username(user.getUsername())
+                .role(user.getRole() != null ? user.getRole().name() : "USER")
                 .email(user.getEmail())
                 .phoneNumber(user.getPhoneNumber())
                 .status(user.getStatus())

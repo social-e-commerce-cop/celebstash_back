@@ -137,7 +137,7 @@ public class DataInitializer implements CommandLineRunner {
                 .product(product1)
                 .mediaUrl("https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=800")
                 .caption("Live backstage soundcheck! 🎤")
-                .type(StoryType.IMAGE)
+                .mediaType("IMAGE")
                 .createdAt(LocalDateTime.now())
                 .expiresAt(LocalDateTime.now().plusHours(24))
                 .build();
