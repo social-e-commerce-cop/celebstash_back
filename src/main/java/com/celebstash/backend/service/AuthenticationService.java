@@ -186,9 +186,8 @@ public class AuthenticationService {
         // Check if user exists
         Optional<User> userOpt = userService.findByEmailOrPhoneNumber(identifier);
         if (userOpt.isEmpty()) {
-            // For security, don't reveal if user exists
-            log.info("Password reset requested for non-existent user: {}", identifier);
-            return true;
+            log.warn("Password reset requested for non-existent user: {}", identifier);
+            throw new IllegalArgumentException("No account found with this email or phone number.");
         }
 
         // Send OTP
@@ -205,20 +204,20 @@ public class AuthenticationService {
         // Validate password match
         if (!Objects.equals(request.getNewPassword(), request.getConfirmPassword())) {
             log.warn("Password mismatch during reset for identifier: {}", request.getIdentifier());
-            return false;
+            throw new IllegalArgumentException("Passwords do not match.");
         }
 
         // Verify OTP
         if (!otpService.verifyOtp(request.getIdentifier(), request.getOtp(), OtpData.OtpType.PASSWORD_RESET)) {
             log.warn("Invalid OTP during password reset for identifier: {}", request.getIdentifier());
-            return false;
+            throw new IllegalArgumentException("Invalid or expired reset code.");
         }
 
         // Find user
         Optional<User> userOpt = userService.findByEmailOrPhoneNumber(request.getIdentifier());
         if (userOpt.isEmpty()) {
             log.warn("User not found during password reset: {}", request.getIdentifier());
-            return false;
+            throw new IllegalArgumentException("No user found with this email or phone number.");
         }
 
         User user = userOpt.get();
@@ -240,6 +239,8 @@ public class AuthenticationService {
                 .expiresIn(jwtUtils.extractExpiration(accessToken).getTime() - System.currentTimeMillis())
                 .userId(user.getId().toString())
                 .fullName(user.getFullName())
+                .username(user.getUsername())
+                .role(user.getRole() != null ? user.getRole().name() : "USER")
                 .email(user.getEmail())
                 .phoneNumber(user.getPhoneNumber())
                 .status(user.getStatus())
