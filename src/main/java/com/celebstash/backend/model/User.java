@@ -71,7 +71,6 @@ public class User implements UserDetails {
     @ColumnDefault("false")
     private boolean accountVerified = false;
 
-
     private LocalDateTime accountVerifiedAt;
 
     private String fandomName;

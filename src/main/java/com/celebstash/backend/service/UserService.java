@@ -33,25 +33,53 @@ public class UserService implements UserDetailsService {
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         return userRepository.findByEmailOrPhoneNumber(username, username)
-                .orElseThrow(() -> new UsernameNotFoundException("User not found with email or phone: " + username));
+                .orElseThrow(() ->
+                        new UsernameNotFoundException(
+                                "User not found with email or phone: " + username
+                        )
+                );
     }
 
     @Transactional
-    public User createUser(String fullName, String identifier, String password, boolean isEmail) {
-        User user = User.builder()
-                .fullName(fullName)
-                .password(passwordEncoder.encode(password))
-                .role(Role.USER)
-                .provider(AuthProvider.LOCAL)
-                .status(AccountStatus.PENDING)
-                .build();
+    public User createUser(
+            String fullName,
+            String identifier,
+            String password,
+            boolean isEmail
+    ) {
+        Optional<User> existingOpt = isEmail
+                ? userRepository.findByEmail(identifier)
+                : userRepository.findByPhoneNumber(identifier);
 
-        if (isEmail) {
-            user.setEmail(identifier);
-            user.setEmailVerified(false);
+        User user;
+
+        if (existingOpt.isPresent()) {
+            user = existingOpt.get();
+
+            if (fullName != null && !fullName.isBlank()) {
+                user.setFullName(fullName);
+            }
+
+            if (password != null && !password.isBlank()) {
+                user.setPassword(passwordEncoder.encode(password));
+            }
+
         } else {
-            user.setPhoneNumber(identifier);
-            user.setPhoneVerified(false);
+            user = User.builder()
+                    .fullName(fullName)
+                    .password(passwordEncoder.encode(password))
+                    .role(Role.USER)
+                    .provider(AuthProvider.LOCAL)
+                    .status(AccountStatus.PENDING)
+                    .build();
+
+            if (isEmail) {
+                user.setEmail(identifier);
+                user.setEmailVerified(false);
+            } else {
+                user.setPhoneNumber(identifier);
+                user.setPhoneVerified(false);
+            }
         }
 
         return userRepository.save(user);
@@ -70,7 +98,9 @@ public class UserService implements UserDetailsService {
         } else {
             user.setPhoneVerified(true);
         }
+
         user.setStatus(AccountStatus.VERIFIED);
+
         return userRepository.save(user);
     }
 
@@ -102,13 +132,19 @@ public class UserService implements UserDetailsService {
 
     /**
      * Get the currently authenticated user
+     *
      * @return the current user
      * @throws AppException if no user is authenticated
      */
     public User getCurrentUser() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        Authentication authentication =
+                SecurityContextHolder.getContext().getAuthentication();
+
         if (authentication == null || !authentication.isAuthenticated()) {
-            throw new AppException("Not authenticated", HttpStatus.UNAUTHORIZED);
+            throw new AppException(
+                    "Not authenticated",
+                    HttpStatus.UNAUTHORIZED
+            );
         }
 
         Object principal = authentication.getPrincipal();
@@ -121,7 +157,12 @@ public class UserService implements UserDetailsService {
         }
 
         return userRepository.findByEmailOrPhoneNumber(username, username)
-                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+                .orElseThrow(() ->
+                        new AppException(
+                                "User not found",
+                                HttpStatus.NOT_FOUND
+                        )
+                );
     }
 
     @Transactional
@@ -131,22 +172,38 @@ public class UserService implements UserDetailsService {
         if (request.getFullName() != null) {
             currentUser.setFullName(request.getFullName());
         }
+
         if (request.getUsername() != null) {
             currentUser.setUsername(request.getUsername());
         }
+
         if (request.getGender() != null) {
             currentUser.setGender(request.getGender());
         }
+
         if (request.getBio() != null) {
             currentUser.setBio(request.getBio());
         }
+
         if (request.getProfilePicture() != null) {
             currentUser.setProfilePicture(request.getProfilePicture());
         }
+
         if (request.getFandomName() != null) {
             currentUser.setFandomName(request.getFandomName());
         }
 
         return userRepository.save(currentUser);
+    }
+
+    public User getUserFromPrincipal(java.security.Principal principal) {
+        if (principal == null) {
+            return getCurrentUser();
+        }
+
+        String identifier = principal.getName();
+
+        return userRepository.findByEmailOrPhoneNumber(identifier, identifier)
+                .orElseGet(this::getCurrentUser);
     }
 }
