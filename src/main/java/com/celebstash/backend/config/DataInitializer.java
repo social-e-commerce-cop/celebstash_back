@@ -159,3 +159,5 @@ public class DataInitializer implements CommandLineRunner {
         log.info("Default Standard User -> Email: user@zikiii.com | Password: password123");
         log.info("Default Artist User -> Email: artist@zikiii.com | Password: password123");
     }
+
+}
