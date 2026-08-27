@@ -27,7 +27,24 @@ public class DataInitializer implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
-        if (userRepository.count() > 0) {
+        // Always seed Admin if not present
+        if (userRepository.findByEmail("admin@zikii.com").isEmpty()) {
+            log.info("Seeding Admin User (admin@zikii.com)...");
+            User adminUser = User.builder()
+                    .fullName("Ange Nadette BATETE")
+                    .email("admin@zikii.com")
+                    .phoneNumber("+1112223333")
+                    .password(passwordEncoder.encode("admin123"))
+                    .role(Role.ADMIN)
+                    .status(AccountStatus.ACTIVE)
+                    .provider(AuthProvider.LOCAL)
+                    .emailVerified(true)
+                    .phoneVerified(true)
+                    .build();
+            userRepository.save(adminUser);
+        }
+
+        if (userRepository.count() > 1) {
             log.info("Database already seeded with initial data.");
             return;
         }

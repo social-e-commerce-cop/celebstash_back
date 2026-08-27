@@ -52,7 +52,8 @@ public class SecurityConfig {
                     "/api/v1/auth/**",
                     "/api-docs/**",
                     "/swagger-ui/**",
-                    "/swagger-ui.html"
+                    "/swagger-ui.html",
+                    "/ws/**"           // WebSocket SockJS handshake
                 ).permitAll()
                 .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/files/**").permitAll()
                 .anyRequest().authenticated()
@@ -63,6 +64,7 @@ public class SecurityConfig {
 
         return http.build();
     }
+
 
     @Bean
     public PasswordEncoder passwordEncoder() {

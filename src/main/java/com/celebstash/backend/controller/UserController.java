@@ -19,6 +19,13 @@ public class UserController {
 
     private final UserService userService;
 
+    @GetMapping
+    @Operation(summary = "Get all users", description = "Returns a list of all registered users (admin access)")
+    @SecurityRequirement(name = "bearerAuth")
+    public ResponseEntity<java.util.List<User>> getAllUsers() {
+        return ResponseEntity.ok(userService.getAllUsers());
+    }
+
     @GetMapping("/me")
     @Operation(summary = "Get current user profile", description = "Returns the currently authenticated user's profile details")
     @SecurityRequirement(name = "bearerAuth")

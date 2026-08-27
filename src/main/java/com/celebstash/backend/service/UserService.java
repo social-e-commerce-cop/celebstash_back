@@ -30,6 +30,10 @@ public class UserService implements UserDetailsService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
 
+    public java.util.List<User> getAllUsers() {
+        return userRepository.findAll();
+    }
+
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         return userRepository.findByEmailOrPhoneNumber(username, username)
