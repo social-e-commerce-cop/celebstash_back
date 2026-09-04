@@ -1,0 +1,43 @@
+# Server Port
+server.port=8080
+
+# Database Configuration (PostgreSQL)
+spring.datasource.url=jdbc:postgresql://localhost:5432/celebstash
+spring.datasource.username=postgres
+spring.datasource.password=REPLACE_WITH_YOUR_POSTGRES_PASSWORD
+spring.datasource.driver-class-name=org.postgresql.Driver
+
+# Hibernate & JPA Configuration
+# 'update' automatically creates/updates database tables based on your entity classes
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.format_sql=true
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect
+
+# Redis Configuration (Used for OTP & caching)
+spring.data.redis.host=localhost
+spring.data.redis.port=6379
+
+# JWT Token Configuration
+app.jwt.secret=404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970337336763979244226452948404D635166546A576E5A7234753778214125442A
+app.jwt.access-token.expiration=86400000
+app.jwt.refresh-token.expiration=604800000
+
+# OTP & Rate Limiting Configuration
+app.otp.expiration=300000
+app.otp.max-attempts=3
+app.otp.rate-limit.per-minute=3
+app.otp.rate-limit.per-day=10
+
+# Twilio Configuration (SMS)
+twilio.accountSid=AC00000000000000000000000000000000
+twilio.authToken=dummy_auth_token_32chars_long_000
+twilio.phoneNumber=+15005550006
+
+# Spring Mail Configuration
+spring.mail.host=smtp.gmail.com
+spring.mail.port=587
+spring.mail.username=noreply@celebstash.com
+spring.mail.password=placeholder
+spring.mail.properties.mail.smtp.auth=true
+spring.mail.properties.mail.smtp.starttls.enable=true
