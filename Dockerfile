@@ -42,6 +42,11 @@ RUN groupadd -r -g 1001 spring && \
 
 WORKDIR /app
 
+# Copy entrypoint script to convert cloud DATABASE_URL to JDBC on container boot
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
+    chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # Prepare directories for uploads and set permissions for non-root user
 RUN mkdir -p /app/uploads && \
     chown -R spring:spring /app
@@ -62,5 +67,6 @@ ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:InitialRAM
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
   CMD curl -f http://localhost:${PORT:-8080}/actuator/health || exit 1
 
-# Launch application using dynamic shell interpolation for $PORT and $JAVA_OPTS
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+# Launch using entrypoint wrapper for automatic cloud database URL conversion
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
