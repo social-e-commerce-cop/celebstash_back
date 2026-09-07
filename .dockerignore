@@ -1,0 +1,52 @@
+# Version control
+.git/
+.gitignore
+.gitattributes
+
+# Build outputs and temporary files
+target/
+build/
+*.class
+
+# IDE and development tool configurations
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/
+.classpath
+.project
+.settings/
+.springBeans
+.sts4-cache
+.apt_generated
+.nb-gradle/
+nbproject/
+
+# Environment files and credentials
+.env
+.env.*
+*.local
+*.secret
+*.pem
+*.key
+*.p12
+
+# Logs and runtime data
+*.log
+logs/
+uploads/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# Documentation and markdown files
+README.md
+HELP.md
+*.md
+
+# Node / frontend artifacts if present
+node_modules/
+package-lock.json

@@ -32,5 +32,15 @@ build/
 ### VS Code ###
 .vscode/
 
+### Local Environment & Secrets ###
+.env
+.env.*
+*.local
+*.secret
+*.pem
+*.key
 
-src/main/resources/application.properties
+### Logs & Uploads ###
+*.log
+logs/
+uploads/
