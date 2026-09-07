@@ -55,11 +55,8 @@ public class SecurityConfig {
                     "/error",
                     "/actuator/**",
                     "/api/v1/auth/**",
-<<<<<<< HEAD
                     "/v3/api-docs/**",
-=======
                     "/api/files/**",
->>>>>>> origin/feature/standard-user-integration
                     "/api-docs/**",
                     "/swagger-ui/**",
                     "/swagger-ui.html",

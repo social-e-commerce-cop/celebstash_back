@@ -1,12 +1,8 @@
 package com.celebstash.backend.config;
 
-import com.celebstash.backend.model.User;
-import com.celebstash.backend.model.Wallet;
-import com.celebstash.backend.model.enums.AccountStatus;
-import com.celebstash.backend.model.enums.AuthProvider;
-import com.celebstash.backend.model.enums.Role;
-import com.celebstash.backend.repository.UserRepository;
-import com.celebstash.backend.repository.WalletRepository;
+import com.celebstash.backend.model.*;
+import com.celebstash.backend.model.enums.*;
+import com.celebstash.backend.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
@@ -15,6 +11,7 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Slf4j
 @Component
@@ -23,58 +20,15 @@ public class DataInitializer implements CommandLineRunner {
 
     private final UserRepository userRepository;
     private final WalletRepository walletRepository;
-<<<<<<< HEAD
-=======
     private final ProductRepository productRepository;
     private final PostRepository postRepository;
     private final StoryRepository storyRepository;
     private final ArtistApplicationRepository artistApplicationRepository;
->>>>>>> origin/feature/standard-user-integration
     private final PasswordEncoder passwordEncoder;
     private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     @Override
     public void run(String... args) throws Exception {
-<<<<<<< HEAD
-        String adminEmail = "karabogretta@gmail.com";
-
-        if (userRepository.findByEmail(adminEmail).isEmpty()) {
-            log.info("Seeding initial Admin user for CelebStash dashboard...");
-
-            User admin = User.builder()
-                    .fullName("Admin User")
-                    .email(adminEmail)
-                    .phoneNumber("+250780000001")
-                    .password(passwordEncoder.encode("admin123"))
-                    .role(Role.ADMIN)
-                    .status(AccountStatus.ACTIVE)
-                    .provider(AuthProvider.LOCAL)
-                    .emailVerified(true)
-                    .phoneVerified(true)
-                    .build();
-
-            admin = userRepository.save(admin);
-
-            // Create associated wallet for the admin
-            Wallet adminWallet = Wallet.builder()
-                    .user(admin)
-                    .balance(new BigDecimal("10000.00"))
-                    .createdAt(LocalDateTime.now())
-                    .updatedAt(LocalDateTime.now())
-                    .build();
-            walletRepository.save(adminWallet);
-
-            log.info("==================================================================");
-            log.info(">>> Admin user seeded successfully! <<<");
-            log.info(">>> Login Email:    {}", adminEmail);
-            log.info(">>> Login Password: {}", "admin123");
-            log.info("==================================================================");
-        } else {
-            log.info("Admin user ({}) already exists in database.", adminEmail);
-        }
-    }
-}
-=======
         // Migration: Ensure all existing user records have a unique username
         migrateExistingUsersUsernames();
 
@@ -112,7 +66,14 @@ public class DataInitializer implements CommandLineRunner {
                         .emailVerified(true)
                         .phoneVerified(true)
                         .build();
-                userRepository.save(adminUser);
+                adminUser = userRepository.save(adminUser);
+                Wallet adminWallet = Wallet.builder()
+                        .user(adminUser)
+                        .balance(new BigDecimal("10000.00"))
+                        .createdAt(LocalDateTime.now())
+                        .updatedAt(LocalDateTime.now())
+                        .build();
+                walletRepository.save(adminWallet);
                 log.info("Seeded Admin User: karabogretta@gmail.com");
             }
         );
@@ -364,4 +325,3 @@ public class DataInitializer implements CommandLineRunner {
         }
     }
 }
->>>>>>> origin/feature/standard-user-integration
