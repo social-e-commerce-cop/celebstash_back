@@ -38,6 +38,7 @@ public class Comment {
 
     private LocalDateTime updatedAt;
 
+    @Builder.Default
     @ManyToMany
     @JoinTable(
         name = "comment_likes",
@@ -50,12 +51,19 @@ public class Comment {
     @JoinColumn(name = "parent_id")
     private Comment parent;
 
+    @Builder.Default
     @OneToMany(mappedBy = "parent", cascade = CascadeType.ALL, orphanRemoval = true)
     private Set<Comment> replies = new HashSet<>();
 
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
+        if (likedBy == null) {
+            likedBy = new HashSet<>();
+        }
+        if (replies == null) {
+            replies = new HashSet<>();
+        }
     }
 
     @PreUpdate
@@ -64,23 +72,28 @@ public class Comment {
     }
 
     public int getLikesCount() {
-        return likedBy.size();
+        return likedBy == null ? 0 : likedBy.size();
     }
 
     public int getRepliesCount() {
-        return replies.size();
+        return replies == null ? 0 : replies.size();
     }
 
     public boolean isLikedBy(User user) {
-        return likedBy.contains(user);
+        return likedBy != null && user != null && likedBy.contains(user);
     }
 
     public void addLike(User user) {
+        if (likedBy == null) {
+            likedBy = new HashSet<>();
+        }
         likedBy.add(user);
     }
 
     public void removeLike(User user) {
-        likedBy.remove(user);
+        if (likedBy != null) {
+            likedBy.remove(user);
+        }
     }
 
     public boolean isReply() {

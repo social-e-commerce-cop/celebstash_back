@@ -23,21 +23,22 @@
         @GeneratedValue(strategy = GenerationType.IDENTITY)
         private Long id;
 
-        @Column(length = 1000)
+        @Column(columnDefinition = "TEXT", nullable = true)
         private String description;
 
         @ElementCollection
         @CollectionTable(name = "post_images", joinColumns = @JoinColumn(name = "post_id"))
-        @Column(name = "image_url")
+        @Column(name = "image_url", columnDefinition = "TEXT")
         private List<String> imageUrls = new ArrayList<>();
 
+        @Column(columnDefinition = "TEXT", nullable = true)
         private String videoUrl;
 
         @ManyToOne(fetch = FetchType.LAZY)
         @JoinColumn(name = "user_id", nullable = false)
         private User user;
 
-        @OneToOne(fetch = FetchType.LAZY)
+        @ManyToOne(fetch = FetchType.LAZY)
         @JoinColumn(name = "product_id")
         private Product product;
 
@@ -45,6 +46,11 @@
         private boolean isSponsored = false;
 
         private String sponsorName;
+
+        private String attachedType;
+        private String attachedTitle;
+        private String attachedSubtitle;
+        private String attachedPrice;
 
         @Enumerated(EnumType.STRING)
         @Column(nullable = false)
@@ -72,6 +78,24 @@
                 inverseJoinColumns = @JoinColumn(name = "user_id")
         )
         private List<User> sharedBy = new ArrayList<>();
+
+        // Users who reposted this post
+        @ManyToMany
+        @JoinTable(
+                name = "post_reposts",
+                joinColumns = @JoinColumn(name = "post_id"),
+                inverseJoinColumns = @JoinColumn(name = "user_id")
+        )
+        private List<User> repostedBy = new ArrayList<>();
+
+        // Users who saved this post
+        @ManyToMany
+        @JoinTable(
+                name = "post_saves",
+                joinColumns = @JoinColumn(name = "post_id"),
+                inverseJoinColumns = @JoinColumn(name = "user_id")
+        )
+        private List<User> savedBy = new ArrayList<>();
 
         @PrePersist
         protected void onCreate() {

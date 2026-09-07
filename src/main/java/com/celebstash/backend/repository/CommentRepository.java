@@ -49,6 +49,9 @@ public interface CommentRepository extends JpaRepository<Comment, Long> {
     @Query("SELECT c FROM Comment c JOIN c.likedBy l WHERE l = :user")
     Page<Comment> findCommentsLikedBy(@Param("user") User user, Pageable pageable);
     
+    // Count top-level comments by post
+    long countByPostAndParentIsNull(Post post);
+    
     // Count comments by post
     long countByPost(Post post);
     

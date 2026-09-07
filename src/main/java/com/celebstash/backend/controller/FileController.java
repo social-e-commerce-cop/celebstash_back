@@ -18,6 +18,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 @RestController
 @RequestMapping("/api/files")
 @RequiredArgsConstructor
@@ -28,29 +31,41 @@ public class FileController {
 
     @PostMapping("/upload")
     public ResponseEntity<String> uploadFile(@RequestParam("file") MultipartFile file) {
-        String fileName = fileStorageService.storeFile(file);
+        try {
+            String fileName = fileStorageService.storeFile(file);
 
-        String fileDownloadUri = ServletUriComponentsBuilder.fromCurrentContextPath()
-                .path("/api/files/")
-                .path(fileName)
-                .toUriString();
+            String fileDownloadUri = ServletUriComponentsBuilder.fromCurrentContextPath()
+                    .path("/api/files/")
+                    .path(fileName)
+                    .toUriString();
 
-        return ResponseEntity.ok(fileDownloadUri);
+            return ResponseEntity.ok(fileDownloadUri);
+        } catch (Exception e) {
+            log.error("Failed to upload file", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("File upload failed: " + e.getMessage());
+        }
     }
 
     @PostMapping("/uploadMultiple")
-    public ResponseEntity<List<String>> uploadMultipleFiles(@RequestParam("files") MultipartFile[] files) {
-        List<String> fileDownloadUrls = Arrays.stream(files)
-                .map(file -> {
-                    String fileName = fileStorageService.storeFile(file);
-                    return ServletUriComponentsBuilder.fromCurrentContextPath()
-                            .path("/api/files/")
-                            .path(fileName)
-                            .toUriString();
-                })
-                .collect(Collectors.toList());
+    public ResponseEntity<?> uploadMultipleFiles(@RequestParam("files") MultipartFile[] files) {
+        try {
+            List<String> fileDownloadUrls = Arrays.stream(files)
+                    .map(file -> {
+                        String fileName = fileStorageService.storeFile(file);
+                        return ServletUriComponentsBuilder.fromCurrentContextPath()
+                                .path("/api/files/")
+                                .path(fileName)
+                                .toUriString();
+                    })
+                    .collect(Collectors.toList());
 
-        return ResponseEntity.ok(fileDownloadUrls);
+            return ResponseEntity.ok(fileDownloadUrls);
+        } catch (Exception e) {
+            log.error("Failed to upload multiple files", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Multiple files upload failed: " + e.getMessage());
+        }
     }
 
     @GetMapping("/{fileName:.+}")

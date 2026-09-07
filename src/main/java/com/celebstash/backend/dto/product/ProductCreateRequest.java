@@ -40,5 +40,9 @@ public class ProductCreateRequest {
     @Min(value = 0, message = "Stock quantity must be greater than or equal to 0")
     private Integer stockQuantity;
 
+    private String category;
+    private java.util.Map<String, Integer> sizeStock;
+    private List<String> availableColors;
+
     private ProductType productType = ProductType.REGULAR;
 }

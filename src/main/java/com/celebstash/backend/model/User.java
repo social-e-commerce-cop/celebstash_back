@@ -1,5 +1,6 @@
 package com.celebstash.backend.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.celebstash.backend.model.enums.AccountStatus;
 import com.celebstash.backend.model.enums.AuthProvider;
 import com.celebstash.backend.model.enums.Gender;
@@ -16,6 +17,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 
 import java.time.LocalDateTime;
 import java.util.Collection;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.util.List;
 
 @Data
@@ -23,6 +25,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 @Table(name = "users")
 public class User implements UserDetails {
 
@@ -42,6 +45,7 @@ public class User implements UserDetails {
     @Column(unique = true)
     private String phoneNumber;
 
+    @JsonIgnore
     @Column(nullable = false)
     private String password;
 
@@ -77,12 +81,13 @@ public class User implements UserDetails {
 
     @PrePersist
     @PreUpdate
-    private void updateAccountVerifiedAt() {
+    private void ensureAccountVerifiedAt() {
         if (accountVerified && accountVerifiedAt == null) {
             accountVerifiedAt = LocalDateTime.now();
         }
     }
 
+    @JsonIgnore
     @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private UserSettings settings;
 

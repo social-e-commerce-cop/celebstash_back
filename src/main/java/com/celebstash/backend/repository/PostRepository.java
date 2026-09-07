@@ -51,4 +51,17 @@ public interface PostRepository extends JpaRepository<Post, Long> {
 
     // Added method to fix the compiler error
     List<Post> findAllByStatusOrderByCreatedAtDesc(com.celebstash.backend.model.enums.PostStatus status);
+
+    // Paginated discovery feed
+    Page<Post> findAllByStatusOrderByCreatedAtDesc(com.celebstash.backend.model.enums.PostStatus status, Pageable pageable);
+
+    // Paginated all posts ordered by creation date
+    Page<Post> findAllByOrderByCreatedAtDesc(Pageable pageable);
+
+    // Paginated saved posts
+    @Query("SELECT p FROM Post p JOIN p.savedBy s WHERE s = :user ORDER BY p.createdAt DESC")
+    Page<Post> findPostsSavedBy(@Param("user") User user, Pageable pageable);
+
+    // Find all posts by user ordered by date
+    Page<Post> findByUserOrderByCreatedAtDesc(User user, Pageable pageable);
 }

@@ -25,6 +25,9 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     // Find all products with a specific status
     List<Product> findByStatus(ProductStatus status);
 
+    // Find top approved products ordered by approval/creation date for New Drops
+    List<Product> findByStatusOrderByApprovedAtDescCreatedAtDesc(ProductStatus status);
+
     // Find all products by seller
     List<Product> findBySeller(User seller);
 

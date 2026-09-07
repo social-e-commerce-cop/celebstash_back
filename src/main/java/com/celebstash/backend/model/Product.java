@@ -11,7 +11,9 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Data
 @Builder
@@ -43,6 +45,22 @@ public class Product {
 
     @Column(nullable = false)
     private Integer stockQuantity;
+
+    @Column
+    private String category;
+
+    @ElementCollection
+    @CollectionTable(name = "product_size_stock", joinColumns = @JoinColumn(name = "product_id"))
+    @MapKeyColumn(name = "size_name")
+    @Column(name = "quantity")
+    @Builder.Default
+    private Map<String, Integer> sizeStock = new HashMap<>();
+
+    @ElementCollection
+    @CollectionTable(name = "product_available_colors", joinColumns = @JoinColumn(name = "product_id"))
+    @Column(name = "color_name")
+    @Builder.Default
+    private List<String> availableColors = new ArrayList<>();
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

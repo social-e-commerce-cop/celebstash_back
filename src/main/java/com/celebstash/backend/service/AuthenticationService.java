@@ -35,7 +35,14 @@ public class AuthenticationService {
         // Validate password match
         if (!Objects.equals(request.getPassword(), request.getConfirmPassword())) {
             log.warn("Password mismatch during signup for identifier: {}", request.getIdentifier());
-            return false;
+            throw new IllegalArgumentException("Passwords do not match.");
+        }
+
+        if (request.getUsername() != null && !request.getUsername().isBlank()) {
+            if (userService.existsByUsername(request.getUsername().trim())) {
+                log.warn("Username already exists: {}", request.getUsername());
+                throw new IllegalArgumentException("Username is already taken.");
+            }
         }
 
         boolean isEmail = isEmail(request.getIdentifier());
@@ -43,10 +50,10 @@ public class AuthenticationService {
         // Check if user already exists
         if (isEmail && userService.existsByEmail(request.getIdentifier())) {
             log.warn("Email already exists: {}", request.getIdentifier());
-            return false;
+            throw new IllegalArgumentException("Email is already registered.");
         } else if (!isEmail && userService.existsByPhoneNumber(request.getIdentifier())) {
             log.warn("Phone number already exists: {}", request.getIdentifier());
-            return false;
+            throw new IllegalArgumentException("Phone number is already registered.");
         }
 
         // Send OTP with user information
@@ -55,6 +62,7 @@ public class AuthenticationService {
             OtpData.OtpType.SIGNUP, 
             httpRequest,
             request.getFullName(),
+            request.getUsername(),
             request.getPassword()
         );
     }
@@ -74,6 +82,7 @@ public class AuthenticationService {
         // Get user information from OTP data
         OtpData otpData = otpDataOpt.get();
         String fullName = otpData.getFullName();
+        String username = otpData.getUsername();
         String password = otpData.getPassword();
 
         if (fullName == null || password == null) {
@@ -90,6 +99,7 @@ public class AuthenticationService {
         // Create user
         User user = userService.createUser(
                 fullName,
+                username,
                 request.getIdentifier(),
                 password,
                 isEmail

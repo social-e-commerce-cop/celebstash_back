@@ -34,6 +34,7 @@ public class NotificationController {
                         .read(n.isRead())
                         .type(n.getType())
                         .createdAt(n.getCreatedAt())
+                        .relatedEntityId(n.getRelatedEntityId())
                         .build())
                 .collect(Collectors.toList());
         return ResponseEntity.ok(responses);

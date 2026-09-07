@@ -24,6 +24,9 @@ public class ProductResponse {
     private List<String> imageUrls;
     private String videoUrl;
     private Integer stockQuantity;
+    private String category;
+    private java.util.Map<String, Integer> sizeStock;
+    private List<String> availableColors;
     private ProductStatus status;
     private ProductType productType;
     private Long sellerId;
