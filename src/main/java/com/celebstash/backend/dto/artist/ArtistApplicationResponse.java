@@ -13,6 +13,8 @@ public class ArtistApplicationResponse {
     private Long userId;
     private String userFullName;
     private String userEmail;
+    private String username;
+    private String userProfilePicture;
     private String stageName;
     private String category;
     private String bio;

@@ -48,10 +48,10 @@ public class OtpService {
     private int ratePerDay;
 
     public boolean sendOtp(String identifier, OtpData.OtpType type, HttpServletRequest request) {
-        return sendOtp(identifier, type, request, null, null);
+        return sendOtp(identifier, type, request, null, null, null);
     }
 
-    public boolean sendOtp(String identifier, OtpData.OtpType type, HttpServletRequest request, String fullName, String password) {
+    public boolean sendOtp(String identifier, OtpData.OtpType type, HttpServletRequest request, String fullName, String username, String password) {
         String clientIp = getClientIp(request);
 
         try {
@@ -72,6 +72,7 @@ public class OtpService {
                     .attempts(0)
                     .createdAt(Instant.now())
                     .fullName(fullName)
+                    .username(username)
                     .password(password)
                     .timeToLive(TimeUnit.MILLISECONDS.toSeconds(otpExpirationMs))
                     .build();
@@ -198,6 +199,7 @@ public class OtpService {
                         .attempts(1)
                         .createdAt(Instant.now())
                         .fullName("New User")
+                        .username("new_user")
                         .password("password123")
                         .build();
             }

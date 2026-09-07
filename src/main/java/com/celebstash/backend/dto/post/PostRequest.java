@@ -15,10 +15,10 @@ import java.util.List;
 @AllArgsConstructor
 public class PostRequest {
 
-    @Size(max = 1000, message = "Description cannot exceed 1000 characters")
+    @Size(max = 5000, message = "Description cannot exceed 5000 characters")
     private String description;
 
-    @Size(min = 3, max = 5, message = "Post must have 3-5 images")
+    @Size(max = 10, message = "Post cannot exceed 10 images")
     private List<String> imageUrls;
 
     private String videoUrl;
@@ -28,4 +28,10 @@ public class PostRequest {
 
     private boolean isSponsored;
     private String sponsorName;
+
+    // Attached Shoppable Item fields
+    private String attachedType;
+    private String attachedTitle;
+    private String attachedSubtitle;
+    private String attachedPrice;
 }

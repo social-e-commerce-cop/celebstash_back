@@ -30,7 +30,7 @@ public class ProductRequest {
     @Min(value = 0, message = "Price must be greater than or equal to 0")
     private BigDecimal price;
 
-    @Size(min = 3, max = 5, message = "Product must have 3-5 images")
+    @Size(min = 1, max = 10, message = "Product must have 1-10 images")
     private List<String> imageUrls;
 
     private String videoUrl;
@@ -39,5 +39,12 @@ public class ProductRequest {
     @Min(value = 0, message = "Stock quantity must be greater than or equal to 0")
     private Integer stockQuantity;
 
+    private String category;
+
+    private java.util.Map<String, Integer> sizeStock;
+
+    private List<String> availableColors;
+
+    @Builder.Default
     private ProductType productType = ProductType.REGULAR;
 }

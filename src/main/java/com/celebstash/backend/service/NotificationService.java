@@ -20,17 +20,29 @@ public class NotificationService {
     private final NotificationRepository notificationRepository;
     private final UserService userService;
 
-    @Transactional
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
     public Notification createNotification(User user, String title, String content, NotificationType type) {
-        Notification notification = Notification.builder()
-                .user(user)
-                .title(title)
-                .content(content)
-                .type(type)
-                .read(false)
-                .createdAt(LocalDateTime.now())
-                .build();
-        return notificationRepository.save(notification);
+        return createNotification(user, title, content, type, null);
+    }
+
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public Notification createNotification(User user, String title, String content, NotificationType type, Long relatedEntityId) {
+        try {
+            Notification notification = Notification.builder()
+                    .user(user)
+                    .title(title)
+                    .content(content)
+                    .type(type)
+                    .relatedEntityId(relatedEntityId)
+                    .read(false)
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            return notificationRepository.save(notification);
+        } catch (Exception e) {
+            org.slf4j.LoggerFactory.getLogger(NotificationService.class)
+                    .error("Failed to create in-app notification: {}", e.getMessage());
+            return null;
+        }
     }
 
     @Transactional(readOnly = true)

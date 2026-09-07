@@ -19,4 +19,5 @@ public class NotificationResponse {
     private boolean read;
     private NotificationType type;
     private LocalDateTime createdAt;
+    private Long relatedEntityId;
 }

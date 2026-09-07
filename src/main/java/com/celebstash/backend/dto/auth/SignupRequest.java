@@ -16,6 +16,8 @@ public class SignupRequest {
     @NotBlank(message = "Full name is required")
     private String fullName;
 
+    private String username;
+
     @NotBlank(message = "Identifier is required")
     private String identifier; // email or phone number
 

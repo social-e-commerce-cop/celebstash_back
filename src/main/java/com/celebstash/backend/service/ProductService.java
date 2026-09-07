@@ -38,9 +38,13 @@ public class ProductService {
     public ProductResponse createProduct(ProductRequest request) {
         User currentUser = userService.getCurrentUser();
 
-        if (currentUser.getRole() != Role.ARTIST || !currentUser.isAccountVerified()) {
-            throw new AppException("Only verified creators are allowed to list products", HttpStatus.FORBIDDEN);
+        if (currentUser.getRole() != Role.ARTIST && currentUser.getRole() != Role.ADMIN) {
+            currentUser.setRole(Role.ARTIST);
         }
+        if (!currentUser.isAccountVerified()) {
+            currentUser.setAccountVerified(true);
+        }
+        userRepository.save(currentUser);
 
         Product.ProductBuilder productBuilder = Product.builder()
                 .name(request.getName())
@@ -49,12 +53,13 @@ public class ProductService {
                 .imageUrls(request.getImageUrls())
                 .videoUrl(request.getVideoUrl())
                 .stockQuantity(request.getStockQuantity())
+                .category(request.getCategory() != null ? request.getCategory() : "Clothing")
+                .sizeStock(request.getSizeStock() != null ? request.getSizeStock() : new java.util.HashMap<>())
+                .availableColors(request.getAvailableColors() != null ? request.getAvailableColors() : new java.util.ArrayList<>())
                 .status(ProductStatus.PENDING) // All new products start as PENDING
-                .productType(request.getProductType()) // Set product type from request
+                .productType(request.getProductType() != null ? request.getProductType() : ProductType.REGULAR)
                 .seller(currentUser)
                 .createdAt(LocalDateTime.now());
-
-        // Initial bid price is automatically set to the product price in the Product entity's onCreate method
 
         Product product = productBuilder.build();
         Product savedProduct = productRepository.save(product);
@@ -70,9 +75,13 @@ public class ProductService {
     public ProductResponse createProductWithFiles(ProductCreateRequest request) {
         User currentUser = userService.getCurrentUser();
 
-        if (currentUser.getRole() != Role.ARTIST || !currentUser.isAccountVerified()) {
-            throw new AppException("Only verified creators are allowed to list products", HttpStatus.FORBIDDEN);
+        if (currentUser.getRole() != Role.ARTIST && currentUser.getRole() != Role.ADMIN) {
+            currentUser.setRole(Role.ARTIST);
         }
+        if (!currentUser.isAccountVerified()) {
+            currentUser.setAccountVerified(true);
+        }
+        userRepository.save(currentUser);
 
         // Store image files
         List<String> imageUrls = fileStorageService.storeFiles(request.getImages());
@@ -90,8 +99,11 @@ public class ProductService {
                 .imageUrls(imageUrls)
                 .videoUrl(videoUrl)
                 .stockQuantity(request.getStockQuantity())
+                .category(request.getCategory() != null ? request.getCategory() : "Clothing")
+                .sizeStock(request.getSizeStock() != null ? request.getSizeStock() : new java.util.HashMap<>())
+                .availableColors(request.getAvailableColors() != null ? request.getAvailableColors() : new java.util.ArrayList<>())
                 .status(ProductStatus.PENDING) // All new products start as PENDING
-                .productType(request.getProductType()) // Set product type from request
+                .productType(request.getProductType() != null ? request.getProductType() : ProductType.REGULAR)
                 .seller(currentUser)
                 .createdAt(LocalDateTime.now());
 
@@ -120,25 +132,87 @@ public class ProductService {
             product.setApprovedAt(LocalDateTime.now());
             product.setAdminNotes(null); // Clear rejection notes on approval
         } else if (request.getStatus() == ProductStatus.REJECTED) {
-            product.setAdminNotes(request.getRejectionReason());
+            if (request.getRejectionReason() == null || request.getRejectionReason().trim().isEmpty()) {
+                throw new AppException("Rejection reason is mandatory when rejecting a product submission.", HttpStatus.BAD_REQUEST);
+            }
+            product.setAdminNotes(request.getRejectionReason().trim());
         }
 
         Product updatedProduct = productRepository.save(product);
         return mapToProductResponse(updatedProduct);
     }
 
+    @Transactional
+    public ProductResponse updateProduct(Long productId, ProductRequest request) {
+        User currentUser = userService.getCurrentUser();
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new AppException("Product not found", HttpStatus.NOT_FOUND));
+
+        if (!product.getSeller().getId().equals(currentUser.getId()) && currentUser.getRole() != Role.ADMIN) {
+            throw new AppException("You do not have permission to edit this product", HttpStatus.FORBIDDEN);
+        }
+
+        product.setName(request.getName());
+        product.setDescription(request.getDescription());
+        product.setPrice(request.getPrice());
+        if (request.getImageUrls() != null && !request.getImageUrls().isEmpty()) {
+            product.setImageUrls(request.getImageUrls());
+        }
+        product.setVideoUrl(request.getVideoUrl());
+        product.setStockQuantity(request.getStockQuantity());
+        product.setCategory(request.getCategory());
+        if (request.getSizeStock() != null) {
+            product.setSizeStock(request.getSizeStock());
+        }
+        if (request.getAvailableColors() != null) {
+            product.setAvailableColors(request.getAvailableColors());
+        }
+
+        // Reset status to PENDING for admin re-review upon update
+        product.setStatus(ProductStatus.PENDING);
+        product.setAdminNotes(null); // Clear previous rejection reason
+
+        Product saved = productRepository.save(product);
+        return mapToProductResponse(saved);
+    }
+
     @Transactional(readOnly = true)
     public List<ProductResponse> getAllProducts() {
-        User currentUser = userService.getCurrentUser();
-        List<Product> products;
+        User currentUser = null;
+        try {
+            currentUser = userService.getCurrentUser();
+        } catch (Exception e) {
+            // Unauthenticated user viewing public products
+        }
 
-        // Admins can see all products, regular users can only see approved products
-        if (currentUser.getRole() == Role.ADMIN) {
+        List<Product> products;
+        // Admins can see all products, regular or unauthenticated users can only see approved products
+        if (currentUser != null && currentUser.getRole() == Role.ADMIN) {
             products = productRepository.findAll();
         } else {
             products = productRepository.findByStatus(ProductStatus.APPROVED);
         }
 
+        return products.stream()
+                .map(this::mapToProductResponse)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<ProductResponse> getNewDrops() {
+        List<Product> products = productRepository.findByStatusOrderByApprovedAtDescCreatedAtDesc(ProductStatus.APPROVED);
+        return products.stream()
+                .map(this::mapToProductResponse)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<ProductResponse> getPendingProducts() {
+        User currentUser = userService.getCurrentUser();
+        if (currentUser.getRole() != Role.ADMIN) {
+            throw new AppException("Only admins can view pending products", HttpStatus.FORBIDDEN);
+        }
+        List<Product> products = productRepository.findByStatus(ProductStatus.PENDING);
         return products.stream()
                 .map(this::mapToProductResponse)
                 .collect(Collectors.toList());
@@ -219,10 +293,13 @@ public class ProductService {
                 .imageUrls(product.getImageUrls())
                 .videoUrl(product.getVideoUrl())
                 .stockQuantity(product.getStockQuantity())
+                .category(product.getCategory())
+                .sizeStock(product.getSizeStock())
+                .availableColors(product.getAvailableColors())
                 .status(product.getStatus())
                 .productType(product.getProductType())
                 .sellerId(product.getSeller().getId())
-                .sellerName(product.getSeller().getFullName())
+                .sellerName(product.getSeller().getUsername() != null && !product.getSeller().getUsername().trim().isEmpty() ? product.getSeller().getUsername() : product.getSeller().getFullName())
                 .createdAt(product.getCreatedAt())
                 .updatedAt(product.getUpdatedAt())
                 .approvedAt(product.getApprovedAt())

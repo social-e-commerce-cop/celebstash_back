@@ -39,8 +39,14 @@ public class FileStorageService {
      * @return the filename of the stored file
      */
     public String storeFile(MultipartFile file) {
-        // Normalize file name
-        String originalFileName = StringUtils.cleanPath(file.getOriginalFilename());
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("Cannot store empty file.");
+        }
+
+        String rawFileName = file.getOriginalFilename();
+        String originalFileName = (rawFileName != null && !rawFileName.isBlank())
+                ? StringUtils.cleanPath(rawFileName)
+                : "upload_" + System.currentTimeMillis() + ".jpg";
         
         try {
             // Check if the file's name contains invalid characters
@@ -52,6 +58,16 @@ public class FileStorageService {
             String fileExtension = "";
             if (originalFileName.contains(".")) {
                 fileExtension = originalFileName.substring(originalFileName.lastIndexOf("."));
+            } else {
+                String contentType = file.getContentType();
+                if (contentType != null) {
+                    if (contentType.contains("png")) fileExtension = ".png";
+                    else if (contentType.contains("gif")) fileExtension = ".gif";
+                    else if (contentType.contains("mp4")) fileExtension = ".mp4";
+                    else fileExtension = ".jpg";
+                } else {
+                    fileExtension = ".jpg";
+                }
             }
             String fileName = UUID.randomUUID().toString() + fileExtension;
 

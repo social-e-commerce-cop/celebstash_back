@@ -33,13 +33,15 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
+    private final PasswordEncoder passwordEncoder;
 
     @Lazy
     @Autowired
     private UserDetailsService userDetailsService;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtAuthFilter) {
+    public SecurityConfig(JwtAuthenticationFilter jwtAuthFilter, PasswordEncoder passwordEncoder) {
         this.jwtAuthFilter = jwtAuthFilter;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @Bean
@@ -50,12 +52,22 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(
                     "/api/v1/auth/**",
+                    "/api/files/**",
                     "/api-docs/**",
                     "/swagger-ui/**",
                     "/swagger-ui.html",
                     "/ws/**"           // WebSocket SockJS handshake
                 ).permitAll()
-                .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/files/**").permitAll()
+                .requestMatchers(org.springframework.http.HttpMethod.GET, 
+                    "/api/files/**",
+                    "/api/posts",
+                    "/api/posts/feed",
+                    "/api/posts/discovery",
+                    "/api/posts/user/**",
+                    "/api/posts/*",
+                    "/api/posts/*/comments",
+                    "/api/follow/users/**"
+                ).permitAll()
                 .anyRequest().authenticated()
             )
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -67,15 +79,10 @@ public class SecurityConfig {
 
 
     @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder(12);
-    }
-
-    @Bean
     public AuthenticationProvider authenticationProvider() {
         DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
         authProvider.setUserDetailsService(userDetailsService);
-        authProvider.setPasswordEncoder(passwordEncoder());
+        authProvider.setPasswordEncoder(passwordEncoder);
         return authProvider;
     }
 

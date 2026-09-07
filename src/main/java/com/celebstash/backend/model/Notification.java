@@ -41,6 +41,9 @@ public class Notification {
     @Column(nullable = false)
     private LocalDateTime createdAt;
 
+    @Column(name = "related_entity_id")
+    private Long relatedEntityId;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();

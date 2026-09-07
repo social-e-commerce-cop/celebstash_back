@@ -41,6 +41,15 @@ public class ProductController {
         return new ResponseEntity<>(productService.createProduct(request), HttpStatus.CREATED);
     }
 
+    @PutMapping("/{id}")
+    @Operation(summary = "Update and resubmit a product", description = "Allows seller to edit product details and resubmit for admin approval (status resets to PENDING)")
+    @SecurityRequirement(name = "bearerAuth")
+    public ResponseEntity<ProductResponse> updateProduct(
+            @PathVariable Long id,
+            @Valid @RequestBody ProductRequest request) {
+        return ResponseEntity.ok(productService.updateProduct(id, request));
+    }
+
     @PostMapping(value = "/upload", consumes = "multipart/form-data")
     @Operation(summary = "Create a new product with file uploads", description = "Creates a new product with file uploads and PENDING status")
     @SecurityRequirement(name = "bearerAuth")
@@ -71,6 +80,21 @@ public class ProductController {
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<List<ProductResponse>> getAllProducts() {
         return ResponseEntity.ok(productService.getAllProducts());
+    }
+
+    @GetMapping("/new-drops")
+    @Operation(summary = "Get new drop products", description = "Returns newly approved products for public shop display")
+    @SecurityRequirement(name = "bearerAuth")
+    public ResponseEntity<List<ProductResponse>> getNewDrops() {
+        return ResponseEntity.ok(productService.getNewDrops());
+    }
+
+    @GetMapping("/pending")
+    @Operation(summary = "Get pending products", description = "Returns all pending products waiting for admin approval")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<List<ProductResponse>> getPendingProducts() {
+        return ResponseEntity.ok(productService.getPendingProducts());
     }
 
     @GetMapping("/my-products")

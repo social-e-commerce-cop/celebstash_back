@@ -13,6 +13,8 @@ import com.celebstash.backend.repository.KycRepository;
 import com.celebstash.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +30,9 @@ public class KycService {
     private final UserRepository userRepository;
     private final UserService userService;
     private final NotificationService notificationService;
+    private final JavaMailSender emailSender;
+    
+    private final String ADMIN_EMAIL = "karabogretta@gmail.com";
 
     @Transactional
     public KycResponse submitKyc(KycSubmitRequest request) {
@@ -67,6 +72,19 @@ public class KycService {
                 "Your creator verification request has been submitted and is currently pending review by an admin.",
                 NotificationType.KYC_STATUS
         );
+        
+        // Notify admin via email
+        try {
+            SimpleMailMessage message = new SimpleMailMessage();
+            message.setTo(ADMIN_EMAIL);
+            message.setSubject("New Creator Verification Request: " + currentUser.getFullName());
+            message.setText("A new creator verification (KYC) request has been submitted by " + currentUser.getFullName() + 
+                    " (" + currentUser.getEmail() + ").\n\nSocial Media Link: " + request.getSocialMediaLink() + 
+                    "\n\nPlease review the documents in the admin dashboard.");
+            emailSender.send(message);
+        } catch (Exception e) {
+            System.err.println("Failed to send admin notification email: " + e.getMessage());
+        }
 
         return mapToResponse(saved);
     }
