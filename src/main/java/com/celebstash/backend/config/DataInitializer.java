@@ -27,6 +27,32 @@ public class DataInitializer implements CommandLineRunner {
     private final PasswordEncoder passwordEncoder;
     private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
+    @org.springframework.beans.factory.annotation.Value("${app.seed.admin-email:karabogretta@gmail.com}")
+    private String adminEmail;
+
+    @org.springframework.beans.factory.annotation.Value("${app.seed.admin-password:}")
+    private String adminPassword;
+
+    @org.springframework.beans.factory.annotation.Value("${app.seed.demo-password:}")
+    private String demoPassword;
+
+    /**
+     * Resolves a seed password from configuration. Seed passwords are never hardcoded: when no
+     * value is configured a random one is generated and logged once, so a fresh deployment can
+     * never ship with a credential that is publicly known from the source code.
+     */
+    private String resolveSeedPassword(String configured, String label) {
+        if (configured != null && !configured.isBlank()) {
+            return configured;
+        }
+        String generated = java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+        log.warn("=================================================================");
+        log.warn("No seed password configured for {}. Generated one-time password: {}", label, generated);
+        log.warn("Set the matching environment variable to control this credential.");
+        log.warn("=================================================================");
+        return generated;
+    }
+
     @Override
     public void run(String... args) throws Exception {
         // Migration: Ensure all existing user records have a unique username
@@ -38,6 +64,10 @@ public class DataInitializer implements CommandLineRunner {
             jdbcTemplate.execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_status_check;");
             jdbcTemplate.execute("ALTER TABLE posts ALTER COLUMN video_url DROP NOT NULL;");
             jdbcTemplate.execute("ALTER TABLE posts ALTER COLUMN description DROP NOT NULL;");
+            // Posts are not required to advertise a product (Post.product is an optional
+            // association); legacy tables created before that carry a NOT NULL that
+            // hibernate's ddl-auto=update never drops, which blocks all plain posts.
+            jdbcTemplate.execute("ALTER TABLE posts ALTER COLUMN product_id DROP NOT NULL;");
             jdbcTemplate.execute("UPDATE music_releases SET availability_status = 'UNRELEASED' WHERE availability_status IS NULL;");
             jdbcTemplate.execute("ALTER TABLE music_releases ALTER COLUMN availability_status DROP NOT NULL;");
             log.info("Successfully dropped legacy user constraints & updated table columns nullability.");
@@ -46,7 +76,7 @@ public class DataInitializer implements CommandLineRunner {
         }
 
         // Ensure Admin user exists
-        userRepository.findByEmail("karabogretta@gmail.com").ifPresentOrElse(
+        userRepository.findByEmail(adminEmail).ifPresentOrElse(
             admin -> {
                 admin.setRole(Role.ADMIN);
                 admin.setStatus(AccountStatus.ACTIVE);
@@ -57,9 +87,9 @@ public class DataInitializer implements CommandLineRunner {
                 User adminUser = User.builder()
                         .fullName("Emmy Gretta")
                         .username("karabogretta")
-                        .email("karabogretta@gmail.com")
+                        .email(adminEmail)
                         .phoneNumber("+1112223333")
-                        .password(passwordEncoder.encode("admin123"))
+                        .password(passwordEncoder.encode(resolveSeedPassword(adminPassword, "admin account " + adminEmail)))
                         .role(Role.ADMIN)
                         .status(AccountStatus.ACTIVE)
                         .provider(AuthProvider.LOCAL)
@@ -74,7 +104,7 @@ public class DataInitializer implements CommandLineRunner {
                         .updatedAt(LocalDateTime.now())
                         .build();
                 walletRepository.save(adminWallet);
-                log.info("Seeded Admin User: karabogretta@gmail.com");
+                log.info("Seeded Admin User: {}", adminEmail);
             }
         );
 
@@ -85,13 +115,15 @@ public class DataInitializer implements CommandLineRunner {
 
         log.info("Seeding initial demo data for CelebStash Standard User and Artist...");
 
+        final String demoAccountPassword = resolveSeedPassword(demoPassword, "demo accounts (@zikiii.com)");
+
         // 1. Create Default Standard User
         User defaultUser = User.builder()
                 .fullName("INEZA Gretta")
                 .username("ineza_gretta")
                 .email("user@zikiii.com")
                 .phoneNumber("+1234567890")
-                .password(passwordEncoder.encode("password123"))
+                .password(passwordEncoder.encode(demoAccountPassword))
                 .role(Role.USER)
                 .status(AccountStatus.ACTIVE)
                 .provider(AuthProvider.LOCAL)
@@ -116,7 +148,7 @@ public class DataInitializer implements CommandLineRunner {
                 .username("taylorswift")
                 .email("artist@zikiii.com")
                 .phoneNumber("+1987654321")
-                .password(passwordEncoder.encode("password123"))
+                .password(passwordEncoder.encode(demoAccountPassword))
                 .role(Role.ARTIST)
                 .status(AccountStatus.ACTIVE)
                 .provider(AuthProvider.LOCAL)
@@ -131,7 +163,7 @@ public class DataInitializer implements CommandLineRunner {
                 .username("billie_eilish")
                 .email("billie@zikiii.com")
                 .phoneNumber("+1987654322")
-                .password(passwordEncoder.encode("password123"))
+                .password(passwordEncoder.encode(demoAccountPassword))
                 .role(Role.USER)
                 .status(AccountStatus.ACTIVE)
                 .provider(AuthProvider.LOCAL)
@@ -146,7 +178,7 @@ public class DataInitializer implements CommandLineRunner {
                 .username("champagnepapi")
                 .email("drake@zikiii.com")
                 .phoneNumber("+1987654323")
-                .password(passwordEncoder.encode("password123"))
+                .password(passwordEncoder.encode(demoAccountPassword))
                 .role(Role.USER)
                 .status(AccountStatus.ACTIVE)
                 .provider(AuthProvider.LOCAL)
@@ -161,7 +193,7 @@ public class DataInitializer implements CommandLineRunner {
                 .username("sza")
                 .email("sza@zikiii.com")
                 .phoneNumber("+1987654324")
-                .password(passwordEncoder.encode("password123"))
+                .password(passwordEncoder.encode(demoAccountPassword))
                 .role(Role.ARTIST)
                 .status(AccountStatus.ACTIVE)
                 .provider(AuthProvider.LOCAL)

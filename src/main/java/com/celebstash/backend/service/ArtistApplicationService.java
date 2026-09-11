@@ -135,6 +135,12 @@ public class ArtistApplicationService {
                 .map(this::mapToResponse);
     }
 
+    public ArtistApplicationResponse getApplicationById(Long id) {
+        ArtistApplication application = applicationRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Artist application not found with id: " + id));
+        return mapToResponse(application);
+    }
+
     public List<ArtistApplicationResponse> getAllApplications(ApplicationStatus status) {
         List<ArtistApplication> list = status != null
                 ? applicationRepository.findByStatusOrderByCreatedAtDesc(status)

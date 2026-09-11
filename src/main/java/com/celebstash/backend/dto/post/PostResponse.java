@@ -35,16 +35,25 @@ public class PostResponse {
     private long sharesCount;
     private long repostsCount;
 
-    // User interactions
-    private boolean isLiked;
-    private boolean isShared;
-    private boolean isReposted;
-    private boolean isSaved;
+    // User interactions.
+    // The fields drop the "is" prefix so that Lombok's isLiked()/isSaved() getters resolve to
+    // the same Jackson property as the field, and @JsonProperty then names it once on the wire.
+    // Clients read "isLiked"/"isSaved"; naming the fields isLiked/isSaved instead would publish
+    // both "liked" and "isLiked" for the same value.
+    @com.fasterxml.jackson.annotation.JsonProperty("isLiked")
+    private boolean liked;
+    @com.fasterxml.jackson.annotation.JsonProperty("isShared")
+    private boolean shared;
+    @com.fasterxml.jackson.annotation.JsonProperty("isReposted")
+    private boolean reposted;
+    @com.fasterxml.jackson.annotation.JsonProperty("isSaved")
+    private boolean saved;
 
     // Comments (optional, may be loaded separately)
     private List<CommentResponse> comments;
 
-    private boolean isSponsored;
+    @com.fasterxml.jackson.annotation.JsonProperty("isSponsored")
+    private boolean sponsored;
     private String sponsorName;
 
     // Attached Shoppable Item fields

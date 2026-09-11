@@ -46,19 +46,12 @@ public class DashboardService {
         entityCounts.add(new DashboardMetricsResponse.EntityCount("Artists", totalArtists, "#A78BFA"));
         entityCounts.add(new DashboardMetricsResponse.EntityCount("Products", totalProducts, "#10B981"));
 
-        // User Growth chart data
+        // Snapshot of current counts only — no fabricated historical series
         List<DashboardMetricsResponse.MonthlyGrowth> userGrowth = new ArrayList<>();
-        userGrowth.add(new DashboardMetricsResponse.MonthlyGrowth("Jan", 150, 420));
-        userGrowth.add(new DashboardMetricsResponse.MonthlyGrowth("Feb", 210, 450));
-        userGrowth.add(new DashboardMetricsResponse.MonthlyGrowth("Mar", 190, 440));
-        userGrowth.add(new DashboardMetricsResponse.MonthlyGrowth("Apr", (int) Math.max(240, totalArtists), (int) Math.max(480, usersDisplay)));
+        userGrowth.add(new DashboardMetricsResponse.MonthlyGrowth("Current", totalArtists, usersDisplay));
 
-        // Revenue chart data
         List<DashboardMetricsResponse.MonthlyRevenue> revenueData = new ArrayList<>();
-        revenueData.add(new DashboardMetricsResponse.MonthlyRevenue("Jan", 45));
-        revenueData.add(new DashboardMetricsResponse.MonthlyRevenue("Feb", 70));
-        revenueData.add(new DashboardMetricsResponse.MonthlyRevenue("Mar", 52));
-        revenueData.add(new DashboardMetricsResponse.MonthlyRevenue("Apr", totalEarnings > 0 ? totalEarnings : 105));
+        revenueData.add(new DashboardMetricsResponse.MonthlyRevenue("Current", totalEarnings));
 
         return DashboardMetricsResponse.builder()
                 .totalUsers(usersDisplay)

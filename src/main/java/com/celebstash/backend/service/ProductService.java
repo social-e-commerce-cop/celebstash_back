@@ -12,7 +12,6 @@ import com.celebstash.backend.model.enums.ProductType;
 import com.celebstash.backend.model.enums.Role;
 import com.celebstash.backend.repository.PostRepository;
 import com.celebstash.backend.repository.ProductRepository;
-import com.celebstash.backend.repository.UserRepository;
 import org.springframework.web.multipart.MultipartFile;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -29,22 +28,27 @@ import java.util.stream.Collectors;
 public class ProductService {
 
     private final ProductRepository productRepository;
-    private final UserRepository userRepository;
     private final UserService userService;
     private final PostRepository postRepository;
     private final FileStorageService fileStorageService;
 
+    /**
+     * Only approved artists (and admins) may list products. Selling rights come from an
+     * approved artist application — self-promotion here would bypass admin review entirely.
+     */
+    private User requireSellerRole() {
+        User currentUser = userService.getCurrentUser();
+        if (currentUser.getRole() != Role.ARTIST && currentUser.getRole() != Role.ADMIN) {
+            throw new AppException(
+                    "Only verified artists can create products. Submit an artist application to get approved.",
+                    HttpStatus.FORBIDDEN);
+        }
+        return currentUser;
+    }
+
     @Transactional
     public ProductResponse createProduct(ProductRequest request) {
-        User currentUser = userService.getCurrentUser();
-
-        if (currentUser.getRole() != Role.ARTIST && currentUser.getRole() != Role.ADMIN) {
-            currentUser.setRole(Role.ARTIST);
-        }
-        if (!currentUser.isAccountVerified()) {
-            currentUser.setAccountVerified(true);
-        }
-        userRepository.save(currentUser);
+        User currentUser = requireSellerRole();
 
         Product.ProductBuilder productBuilder = Product.builder()
                 .name(request.getName())
@@ -73,15 +77,7 @@ public class ProductService {
      */
     @Transactional
     public ProductResponse createProductWithFiles(ProductCreateRequest request) {
-        User currentUser = userService.getCurrentUser();
-
-        if (currentUser.getRole() != Role.ARTIST && currentUser.getRole() != Role.ADMIN) {
-            currentUser.setRole(Role.ARTIST);
-        }
-        if (!currentUser.isAccountVerified()) {
-            currentUser.setAccountVerified(true);
-        }
-        userRepository.save(currentUser);
+        User currentUser = requireSellerRole();
 
         // Store image files
         List<String> imageUrls = fileStorageService.storeFiles(request.getImages());

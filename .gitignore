@@ -33,8 +33,6 @@ build/
 .vscode/
 
 ### Local Environment & Secrets ###
-.env
-.env.*
 *.local
 *.secret
 *.pem

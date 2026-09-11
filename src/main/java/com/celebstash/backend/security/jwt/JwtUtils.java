@@ -56,21 +56,43 @@ public class JwtUtils {
                 .getBody();
     }
 
+    /**
+     * Cached signing key derived from the configured secret.
+     *
+     * <p>This must be a stable, single key for the lifetime of the application. A previous
+     * implementation generated a fresh random key whenever the configured secret could not be
+     * used, which meant every call produced a different key — tokens were then signed with one
+     * key and validated against another, breaking authentication in a way that is very hard to
+     * diagnose. An unusable secret is now a startup failure instead.
+     */
+    private volatile Key signingKey;
+
     private Key getSigningKey() {
-        try {
-            // Try to use the configured secret key if it's valid
-            byte[] keyBytes = Decoders.BASE64.decode(jwtSecret);
-            if (keyBytes.length * 8 >= 256) { // Check if key is at least 256 bits
-                return Keys.hmacShaKeyFor(keyBytes);
-            } else {
-                log.warn("Configured JWT secret key is less than 256 bits. Using a secure generated key instead.");
+        if (signingKey == null) {
+            synchronized (this) {
+                if (signingKey == null) {
+                    signingKey = buildSigningKey();
+                }
             }
+        }
+        return signingKey;
+    }
+
+    private Key buildSigningKey() {
+        byte[] keyBytes;
+        try {
+            keyBytes = Decoders.BASE64.decode(jwtSecret);
         } catch (Exception e) {
-            log.warn("Error using configured JWT secret key: {}. Using a secure generated key instead.", e.getMessage());
+            throw new IllegalStateException(
+                    "app.jwt.secret is not valid Base64. Configure APP_JWT_SECRET with a Base64-encoded key of at least 256 bits.", e);
         }
 
-        // If the configured key is invalid or too short, generate a secure key
-        return Keys.secretKeyFor(SignatureAlgorithm.HS256);
+        if (keyBytes.length * 8 < 256) {
+            throw new IllegalStateException(
+                    "app.jwt.secret is too short (" + (keyBytes.length * 8) + " bits). Configure APP_JWT_SECRET with at least 256 bits.");
+        }
+
+        return Keys.hmacShaKeyFor(keyBytes);
     }
 
     public boolean isTokenExpired(String token) {

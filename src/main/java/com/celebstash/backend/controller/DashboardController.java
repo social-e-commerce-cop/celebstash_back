@@ -17,6 +17,7 @@ public class DashboardController {
     private final DashboardService dashboardService;
 
     @GetMapping("/metrics")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<DashboardMetricsResponse> getDashboardMetrics() {
         return ResponseEntity.ok(dashboardService.getMetrics());
     }

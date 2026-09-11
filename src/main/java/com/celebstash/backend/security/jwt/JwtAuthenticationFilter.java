@@ -47,6 +47,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 if (username != null) {
                     UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 
+                    // An account locked or disabled after the token was issued must lose access
+                    // immediately rather than staying authenticated until the token expires.
+                    if (!userDetails.isEnabled() || !userDetails.isAccountNonLocked()) {
+                        log.debug("Rejecting token for inactive account: {}", username);
+                        filterChain.doFilter(request, response);
+                        return;
+                    }
+
                     if (jwtUtils.validateToken(jwt, userDetails)) {
                         UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                                 userDetails, null, userDetails.getAuthorities());

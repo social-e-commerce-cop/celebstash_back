@@ -47,6 +47,19 @@ public class OtpService {
     @Value("${app.otp.rate-limit.per-day:20}")
     private int ratePerDay;
 
+    /**
+     * Optional development-only master OTP. Disabled (blank) by default so that no
+     * universal code is ever accepted in a deployed environment — a master code that
+     * works for every identifier would allow anyone to complete a password reset for
+     * any account, including ADMIN. Set APP_OTP_DEV_MASTER_CODE locally if needed.
+     */
+    @Value("${app.otp.dev-master-code:}")
+    private String devMasterCode;
+
+    private boolean isDevMasterCode(String otp) {
+        return devMasterCode != null && !devMasterCode.isBlank() && devMasterCode.equals(otp);
+    }
+
     public boolean sendOtp(String identifier, OtpData.OtpType type, HttpServletRequest request) {
         return sendOtp(identifier, type, request, null, null, null);
     }
@@ -178,7 +191,6 @@ public class OtpService {
     }
 
     public boolean verifyOtpWithoutConsuming(String identifier, String otp, OtpData.OtpType type) {
-        if ("123456".equals(otp)) return true;
         return verifyAndGetOtp(identifier, otp, type, false).isPresent();
     }
 
@@ -187,23 +199,15 @@ public class OtpService {
     }
 
     public Optional<OtpData> verifyAndGetOtp(String identifier, String otp, OtpData.OtpType type, boolean consume) {
-        // Universal Master OTP for Dev testing
-        if ("123456".equals(otp)) {
-            log.info("🔐 Dev Master OTP 123456 accepted for {}", identifier);
+        // Development-only master OTP. Disabled unless app.otp.dev-master-code is configured.
+        if (isDevMasterCode(otp)) {
+            log.warn("🔐 Dev master OTP accepted for {} — this must never be enabled in production", identifier);
             OtpData devData = devInMemoryOtpMap.get(identifier);
-            if (devData == null) {
-                devData = OtpData.builder()
-                        .id(identifier)
-                        .otp("123456")
-                        .type(type)
-                        .attempts(1)
-                        .createdAt(Instant.now())
-                        .fullName("New User")
-                        .username("new_user")
-                        .password("password123")
-                        .build();
+            if (devData != null) {
+                return Optional.of(devData);
             }
-            return Optional.of(devData);
+            log.warn("No pending OTP request found for {}; master code rejected.", identifier);
+            return Optional.empty();
         }
 
         try {

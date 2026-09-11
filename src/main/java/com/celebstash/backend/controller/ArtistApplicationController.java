@@ -9,6 +9,7 @@ import com.celebstash.backend.service.ArtistApplicationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -43,6 +44,7 @@ public class ArtistApplicationController {
 
     // ADMIN: List all applications (optional status filter)
     @GetMapping("/admin/artist-applications")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<List<ArtistApplicationResponse>> getAllApplications(
             @RequestParam(required = false) ApplicationStatus status
     ) {
@@ -50,8 +52,17 @@ public class ArtistApplicationController {
         return ResponseEntity.ok(applications);
     }
 
+    // ADMIN: Get application by ID
+    @GetMapping("/admin/artist-applications/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ArtistApplicationResponse> getApplicationById(@PathVariable Long id) {
+        ArtistApplicationResponse response = applicationService.getApplicationById(id);
+        return ResponseEntity.ok(response);
+    }
+
     // ADMIN: Review (Approve / Reject) an application
     @PostMapping("/admin/artist-applications/{id}/review")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ArtistApplicationResponse> reviewApplication(
             @PathVariable Long id,
             @RequestBody ReviewApplicationRequest reviewRequest

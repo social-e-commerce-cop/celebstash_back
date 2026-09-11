@@ -2,6 +2,7 @@ package com.celebstash.backend.controller;
 
 import com.celebstash.backend.dto.user.UserProfileUpdateRequest;
 import com.celebstash.backend.dto.user.UserPublicDTO;
+import com.celebstash.backend.dto.user.UserStatusUpdateRequest;
 import com.celebstash.backend.model.User;
 import com.celebstash.backend.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -10,6 +11,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -23,6 +25,7 @@ public class UserController {
     @GetMapping
     @Operation(summary = "Get all users", description = "Returns a list of all registered users (admin access)")
     @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<java.util.List<UserPublicDTO>> getAllUsers() {
         return ResponseEntity.ok(userService.getAllUsers());
     }
@@ -39,6 +42,17 @@ public class UserController {
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<User> updateProfile(@Valid @RequestBody UserProfileUpdateRequest request) {
         return ResponseEntity.ok(userService.updateProfile(request));
+    }
+
+    @PatchMapping("/{id}/status")
+    @Operation(summary = "Update a user's account status",
+            description = "Admin only. Use DISABLED to block an account and ACTIVE to restore it.")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<UserPublicDTO> updateUserStatus(
+            @PathVariable Long id,
+            @Valid @RequestBody UserStatusUpdateRequest request) {
+        return ResponseEntity.ok(userService.updateUserStatusAsAdmin(id, request.getStatus()));
     }
 
     @GetMapping("/{id}")

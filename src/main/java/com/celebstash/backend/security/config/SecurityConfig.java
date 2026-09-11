@@ -47,40 +47,39 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-            .csrf(AbstractHttpConfigurer::disable)
-            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers(
-                    "/",
-                    "/error",
-                    "/actuator/**",
-                    "/api/v1/auth/**",
-                    "/v3/api-docs/**",
-                    "/api/files/**",
-                    "/api-docs/**",
-                    "/swagger-ui/**",
-                    "/swagger-ui.html",
-                    "/ws/**"           // WebSocket SockJS handshake
-                ).permitAll()
-                .requestMatchers(org.springframework.http.HttpMethod.GET, 
-                    "/api/files/**",
-                    "/api/posts",
-                    "/api/posts/feed",
-                    "/api/posts/discovery",
-                    "/api/posts/user/**",
-                    "/api/posts/*",
-                    "/api/posts/*/comments",
-                    "/api/follow/users/**"
-                ).permitAll()
-                .anyRequest().authenticated()
-            )
-            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .authenticationProvider(authenticationProvider())
-            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+                .csrf(AbstractHttpConfigurer::disable)
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(
+                                "/",
+                                "/error",
+                                "/actuator/**",
+                                "/api/v1/auth/**",
+                                "/v3/api-docs/**",
+                                "/api-docs/**",
+                                "/swagger-ui/**",
+                                "/swagger-ui.html",
+                                "/ws/**" // WebSocket SockJS handshake
+                        ).permitAll()
+                        // Uploaded media must stay publicly readable so images render in the
+                        // app and dashboard, but writing files requires an authenticated user.
+                        .requestMatchers(org.springframework.http.HttpMethod.GET,
+                                "/api/files/**",
+                                "/api/posts",
+                                "/api/posts/feed",
+                                "/api/posts/discovery",
+                                "/api/posts/user/**",
+                                "/api/posts/*",
+                                "/api/posts/*/comments",
+                                "/api/follow/users/**")
+                        .permitAll()
+                        .anyRequest().authenticated())
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authenticationProvider(authenticationProvider())
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
-
 
     @Bean
     public AuthenticationProvider authenticationProvider() {

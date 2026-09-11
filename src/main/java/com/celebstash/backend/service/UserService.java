@@ -109,6 +109,32 @@ public class UserService implements UserDetailsService {
         return userRepository.save(user);
     }
 
+    /**
+     * Admin action: change another account's status.
+     *
+     * <p>DISABLED is the admin-initiated block (see {@link AccountStatus}); LOCKED is reserved for
+     * system-driven locks. Both make {@code User.isEnabled()}/{@code isAccountNonLocked()} fail, so
+     * login is refused and existing tokens stop being accepted by the JWT filter.
+     */
+    @Transactional
+    public UserPublicDTO updateUserStatusAsAdmin(Long userId, AccountStatus status) {
+        User target = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+
+        User admin = getCurrentUser();
+        if (admin.getId().equals(target.getId())) {
+            throw new AppException("You cannot change your own account status", HttpStatus.BAD_REQUEST);
+        }
+        if (target.getRole() == Role.ADMIN) {
+            throw new AppException("Administrator accounts cannot be blocked from the dashboard", HttpStatus.FORBIDDEN);
+        }
+
+        target.setStatus(status);
+        User saved = userRepository.save(target);
+        log.info("Admin {} set status of user {} to {}", admin.getEmail(), target.getId(), status);
+        return toPublicDTO(saved);
+    }
+
     @Transactional
     public User verifyUser(User user, boolean isEmail) {
         if (isEmail) {
@@ -250,9 +276,9 @@ public class UserService implements UserDetailsService {
     public UserPublicDTO toPublicDTO(User user) {
         long followersCount = followerRepository.countByFollowing(user);
         long followingCount = followerRepository.countByFollower(user);
-        java.time.LocalDateTime createdAtDate = user.getAccountVerifiedAt() != null
-                ? user.getAccountVerifiedAt()
-                : java.time.LocalDateTime.of(2026, 1, 1, 0, 0);
+        // The users table has no creation timestamp, so the verification date is the only real
+        // signal available. Left null when unknown rather than reporting an invented join date.
+        java.time.LocalDateTime createdAtDate = user.getAccountVerifiedAt();
         return UserPublicDTO.builder()
                 .id(user.getId())
                 .fullName(user.getFullName())

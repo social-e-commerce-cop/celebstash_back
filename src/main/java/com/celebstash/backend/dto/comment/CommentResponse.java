@@ -26,14 +26,17 @@ public class CommentResponse {
     
     // Parent comment info (if this is a reply)
     private Long parentId;
-    private boolean isReply;
+    // See PostResponse: field drops the "is" prefix, @JsonProperty restores it on the wire.
+    @com.fasterxml.jackson.annotation.JsonProperty("isReply")
+    private boolean reply;
     
     // Counts
     private int likesCount;
     private int repliesCount;
     
     // User interactions
-    private boolean isLiked;
+    @com.fasterxml.jackson.annotation.JsonProperty("isLiked")
+    private boolean liked;
     
     // Replies (optional, may be loaded separately)
     private List<CommentResponse> replies;
