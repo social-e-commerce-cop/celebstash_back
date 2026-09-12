@@ -61,6 +61,11 @@ public class SecurityConfig {
                                 "/swagger-ui.html",
                                 "/ws/**" // WebSocket SockJS handshake
                         ).permitAll()
+                        // Username availability is checked on the signup form, before the user
+                        // has an account or a token, so it cannot require authentication.
+                        .requestMatchers(org.springframework.http.HttpMethod.GET,
+                                "/api/v1/users/check-username")
+                        .permitAll()
                         // Uploaded media must stay publicly readable so images render in the
                         // app and dashboard, but writing files requires an authenticated user.
                         .requestMatchers(org.springframework.http.HttpMethod.GET,

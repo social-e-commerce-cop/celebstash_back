@@ -5,10 +5,26 @@ spring.application.name=celebstash-backend
 
 # Database Configuration (PostgreSQL)
 # For production (Render / Neon / Supabase / RDS), set SPRING_DATASOURCE_URL, SPRING_DATASOURCE_USERNAME, and SPRING_DATASOURCE_PASSWORD
+#
+# Neon requires TLS. Use the JDBC form of the Neon connection string:
+#   SPRING_DATASOURCE_URL=jdbc:postgresql://<endpoint>.<region>.aws.neon.tech/neondb?sslmode=require
+#   SPRING_DATASOURCE_USERNAME=<neon role>
+#   SPRING_DATASOURCE_PASSWORD=<neon password>
+# Drop Neon's channel_binding=require parameter — it is libpq-only and the JDBC driver rejects it.
+# For the pooled (PgBouncer) endpoint add "-pooler" to the host and append &prepareThreshold=0.
 spring.datasource.url=${SPRING_DATASOURCE_URL:${DATABASE_URL:jdbc:postgresql://localhost:5432/celebstash}}
 spring.datasource.username=${SPRING_DATASOURCE_USERNAME:${DATABASE_USERNAME:postgres}}
 spring.datasource.password=${SPRING_DATASOURCE_PASSWORD:${DATABASE_PASSWORD:REPLACE_WITH_YOUR_POSTGRES_PASSWORD}}
 spring.datasource.driver-class-name=org.postgresql.Driver
+
+# Connection pool (HikariCP) — tuned for a managed endpoint that autosuspends when idle.
+spring.datasource.hikari.maximum-pool-size=${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:10}
+spring.datasource.hikari.minimum-idle=${SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE:2}
+spring.datasource.hikari.connection-timeout=${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:30000}
+spring.datasource.hikari.idle-timeout=${SPRING_DATASOURCE_HIKARI_IDLE_TIMEOUT:120000}
+spring.datasource.hikari.keepalive-time=${SPRING_DATASOURCE_HIKARI_KEEPALIVE_TIME:120000}
+spring.datasource.hikari.max-lifetime=${SPRING_DATASOURCE_HIKARI_MAX_LIFETIME:300000}
+spring.datasource.hikari.validation-timeout=${SPRING_DATASOURCE_HIKARI_VALIDATION_TIMEOUT:5000}
 
 # Hibernate & JPA Configuration
 spring.jpa.hibernate.ddl-auto=${SPRING_JPA_HIBERNATE_DDL_AUTO:update}
@@ -16,6 +32,9 @@ spring.jpa.show-sql=${SPRING_JPA_SHOW_SQL:false}
 spring.jpa.properties.hibernate.format_sql=true
 spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect
 spring.sql.init.mode=${SPRING_SQL_INIT_MODE:always}
+# Required so Hibernate creates the schema before schema.sql patches it. Without this, startup
+# against a brand-new/empty database fails on schema.sql's unguarded UPDATE statements.
+spring.jpa.defer-datasource-initialization=${SPRING_JPA_DEFER_DATASOURCE_INITIALIZATION:true}
 
 # Redis Configuration (Used for OTP & caching)
 spring.data.redis.host=${SPRING_DATA_REDIS_HOST:${REDIS_HOST:localhost}}
