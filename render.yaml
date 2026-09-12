@@ -6,10 +6,24 @@ services:
     branch: nadette
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    healthCheckPath: /actuator/health
+    # Readiness reflects "started + database reachable". The aggregate /actuator/health also
+    # includes Redis and mail, which are optional here and would report DOWN (503) on a service
+    # with no Redis attached — that would fail the platform health check for no real reason.
+    healthCheckPath: /actuator/health/readiness
     envVars:
       - key: PORT
         value: 8080
+
+      # Startup cost control. Spring Boot binds the HTTP port only after the application context
+      # finishes refreshing, and ddl-auto=update makes Hibernate introspect column metadata for
+      # every table before that happens. Against a remote database that scan takes long enough
+      # that the platform's port scan times out and the deploy is killed before it ever listens.
+      # The schema is already created in Neon, so skip both the scan and the patch script here.
+      # Set ddl-auto back to "update" temporarily when a deploy must apply new entity columns.
+      - key: SPRING_JPA_HIBERNATE_DDL_AUTO
+        value: none
+      - key: SPRING_SQL_INIT_MODE
+        value: never
 
       # Database: Neon Postgres.
       #
