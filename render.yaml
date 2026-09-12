@@ -10,9 +10,19 @@ services:
     envVars:
       - key: PORT
         value: 8080
+
+      # Database: Neon Postgres.
+      #
+      # Set these three in the Render dashboard (Environment tab). Do NOT also link a Render
+      # PostgreSQL instance to this service: Render injects DATABASE_URL for a linked database,
+      # which is a *different* database and would give the deployed app different data from the
+      # one used locally. docker-entrypoint.sh now prefers SPRING_DATASOURCE_URL and ignores
+      # DATABASE_URL, but leaving both configured is confusing — unlink the Render database.
+      #
+      # Format (note ?sslmode=require; omit Neon's channel_binding, which the JDBC driver rejects):
+      #   jdbc:postgresql://<endpoint>.<region>.aws.neon.tech/neondb?sslmode=require
       - key: SPRING_DATASOURCE_URL
         sync: false
-        # Example format: jdbc:postgresql://<host>:<port>/<dbname>
       - key: SPRING_DATASOURCE_USERNAME
         sync: false
       - key: SPRING_DATASOURCE_PASSWORD
@@ -35,7 +45,19 @@ services:
         value: smtp.gmail.com
       - key: SPRING_MAIL_PORT
         value: 587
+      # Required: OTP delivery for signup. SMTP credentials are no longer hardcoded in
+      # application.properties, so signup verification emails fail unless these are set here.
       - key: SPRING_MAIL_USERNAME
         sync: false
       - key: SPRING_MAIL_PASSWORD
+        sync: false
+
+      # Seed accounts. DataInitializer only creates these when they do not already exist; if
+      # left unset it generates a random password and logs it once. Set them explicitly so the
+      # deployed environment has known, controlled credentials.
+      - key: APP_SEED_ADMIN_EMAIL
+        sync: false
+      - key: APP_SEED_ADMIN_PASSWORD
+        sync: false
+      - key: APP_SEED_DEMO_PASSWORD
         sync: false
