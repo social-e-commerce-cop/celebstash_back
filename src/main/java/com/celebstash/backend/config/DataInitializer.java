@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Slf4j
 @Component
@@ -26,6 +27,10 @@ public class DataInitializer implements CommandLineRunner {
     private final ArtistApplicationRepository artistApplicationRepository;
     private final PasswordEncoder passwordEncoder;
     private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
+    /** Identity the admin row is seeded with; also used to find an admin whose email has drifted. */
+    private static final String ADMIN_USERNAME = "karabogretta";
+    private static final String ADMIN_PHONE = "+1112223333";
 
     @org.springframework.beans.factory.annotation.Value("${app.seed.admin-email:karabogretta@gmail.com}")
     private String adminEmail;
@@ -53,8 +58,22 @@ public class DataInitializer implements CommandLineRunner {
         return generated;
     }
 
+    /**
+     * Seeding must never prevent the application from serving traffic. A CommandLineRunner that
+     * throws aborts the whole Spring Boot process, so a constraint violation while seeding demo
+     * data would take a running deployment down. Failures are logged loudly and startup continues.
+     */
     @Override
-    public void run(String... args) throws Exception {
+    public void run(String... args) {
+        try {
+            seed();
+        } catch (Exception e) {
+            log.error("Data initialization failed; the application will continue to start. Cause: {}",
+                    e.getMessage(), e);
+        }
+    }
+
+    private void seed() {
         // Migration: Ensure all existing user records have a unique username
         migrateExistingUsersUsernames();
 
@@ -75,20 +94,40 @@ public class DataInitializer implements CommandLineRunner {
             log.warn("Could not drop legacy constraints/alter columns: {}", e.getMessage());
         }
 
-        // Ensure Admin user exists
-        userRepository.findByEmail(adminEmail).ifPresentOrElse(
+        // Ensure Admin user exists.
+        //
+        // The admin is located by email, then username, then phone. Matching on email alone is
+        // not enough: when app.seed.admin-email differs from the email an existing admin row was
+        // created with, the lookup misses and the create path below collides with that row's
+        // unique username/phone — which previously aborted startup entirely.
+        Optional<User> existingAdmin = userRepository.findByEmail(adminEmail);
+        if (existingAdmin.isEmpty()) {
+            existingAdmin = userRepository.findByUsername(ADMIN_USERNAME);
+        }
+        if (existingAdmin.isEmpty()) {
+            existingAdmin = userRepository.findByPhoneNumber(ADMIN_PHONE);
+        }
+
+        existingAdmin.ifPresentOrElse(
             admin -> {
                 admin.setRole(Role.ADMIN);
                 admin.setStatus(AccountStatus.ACTIVE);
                 admin.setEmailVerified(true);
                 userRepository.save(admin);
+                log.info("Admin account already present (id={}, email={}); ensured ADMIN/ACTIVE.",
+                        admin.getId(), admin.getEmail());
             },
             () -> {
+                // Only claim the default username/phone if they are actually free, so seeding a
+                // second environment against a shared database cannot violate a unique constraint.
+                String username = userRepository.existsByUsername(ADMIN_USERNAME) ? null : ADMIN_USERNAME;
+                String phone = userRepository.findByPhoneNumber(ADMIN_PHONE).isPresent() ? null : ADMIN_PHONE;
+
                 User adminUser = User.builder()
                         .fullName("Emmy Gretta")
-                        .username("karabogretta")
+                        .username(username)
                         .email(adminEmail)
-                        .phoneNumber("+1112223333")
+                        .phoneNumber(phone)
                         .password(passwordEncoder.encode(resolveSeedPassword(adminPassword, "admin account " + adminEmail)))
                         .role(Role.ADMIN)
                         .status(AccountStatus.ACTIVE)
