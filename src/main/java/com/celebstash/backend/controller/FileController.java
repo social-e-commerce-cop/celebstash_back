@@ -32,14 +32,9 @@ public class FileController {
     @PostMapping("/upload")
     public ResponseEntity<String> uploadFile(@RequestParam("file") MultipartFile file) {
         try {
-            String fileName = fileStorageService.storeFile(file);
-
-            String fileDownloadUri = ServletUriComponentsBuilder.fromCurrentContextPath()
-                    .path("/api/files/")
-                    .path(fileName)
-                    .toUriString();
-
-            return ResponseEntity.ok(fileDownloadUri);
+            // Returns a Cloudinary CDN URL when remote storage is configured, otherwise the
+            // local /api/files/{name} URL. Same response shape either way.
+            return ResponseEntity.ok(fileStorageService.storeFileAndGetPublicUrl(file));
         } catch (Exception e) {
             log.error("Failed to upload file", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -51,13 +46,7 @@ public class FileController {
     public ResponseEntity<?> uploadMultipleFiles(@RequestParam("files") MultipartFile[] files) {
         try {
             List<String> fileDownloadUrls = Arrays.stream(files)
-                    .map(file -> {
-                        String fileName = fileStorageService.storeFile(file);
-                        return ServletUriComponentsBuilder.fromCurrentContextPath()
-                                .path("/api/files/")
-                                .path(fileName)
-                                .toUriString();
-                    })
+                    .map(fileStorageService::storeFileAndGetPublicUrl)
                     .collect(Collectors.toList());
 
             return ResponseEntity.ok(fileDownloadUrls);

@@ -79,13 +79,13 @@ public class ProductService {
     public ProductResponse createProductWithFiles(ProductCreateRequest request) {
         User currentUser = requireSellerRole();
 
-        // Store image files
-        List<String> imageUrls = fileStorageService.storeFiles(request.getImages());
+        // Store media and keep the resolvable public URLs. These previously held bare filenames,
+        // which clients could not turn back into a fetchable address.
+        List<String> imageUrls = fileStorageService.storeFilesAndGetPublicUrls(request.getImages());
 
-        // Store video file if provided
         String videoUrl = null;
         if (request.getVideo() != null && !request.getVideo().isEmpty()) {
-            videoUrl = fileStorageService.storeFile(request.getVideo());
+            videoUrl = fileStorageService.storeFileAndGetPublicUrl(request.getVideo());
         }
 
         Product.ProductBuilder productBuilder = Product.builder()

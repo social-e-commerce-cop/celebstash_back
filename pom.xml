@@ -102,6 +102,15 @@
 			<version>9.13.0</version> <!-- latest stable -->
 		</dependency>
 
+		<!-- Cloudinary: durable, CDN-backed storage for uploaded images/video.
+		     The container filesystem on a PaaS is ephemeral, so locally stored uploads are
+		     lost on every deploy. Only used when CLOUDINARY_URL is configured. -->
+		<dependency>
+			<groupId>com.cloudinary</groupId>
+			<artifactId>cloudinary-http44</artifactId>
+			<version>1.39.0</version>
+		</dependency>
+
 
 
 		<dependency>

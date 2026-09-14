@@ -80,6 +80,13 @@ spring.servlet.multipart.max-file-size=150MB
 spring.servlet.multipart.max-request-size=150MB
 file.upload-dir=${FILE_UPLOAD_DIR:uploads}
 
+# Cloudinary (durable media storage). Leave blank to store uploads on the local filesystem.
+# Required for any deployment whose container filesystem is ephemeral, otherwise uploaded
+# images disappear on the next deploy while the database still references them.
+# Format: cloudinary://<api_key>:<api_secret>@<cloud_name>
+cloudinary.url=${CLOUDINARY_URL:}
+cloudinary.folder=${CLOUDINARY_FOLDER:celebstash}
+
 # Jackson Configuration
 spring.jackson.serialization.fail-on-empty-beans=false
 

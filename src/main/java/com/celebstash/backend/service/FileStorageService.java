@@ -1,11 +1,15 @@
 package com.celebstash.backend.service;
 
+import com.cloudinary.Cloudinary;
+import com.cloudinary.utils.ObjectUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.io.IOException;
 import java.net.MalformedURLException;
@@ -15,21 +19,125 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
+@Slf4j
 @Service
 public class FileStorageService {
 
     private final Path fileStorageLocation;
 
-    public FileStorageService(@Value("${file.upload-dir:uploads}") String uploadDir) {
+    /**
+     * Cloudinary client, or {@code null} when no credentials are configured.
+     *
+     * <p>Uploads written to the container filesystem do not survive a redeploy on a PaaS, so a
+     * deployed instance must push media to durable storage instead. When Cloudinary is configured
+     * uploads go there and the public CDN URL is returned; otherwise the original local-disk
+     * behaviour is kept so local development works with no extra setup.
+     */
+    private final Cloudinary cloudinary;
+    private final String cloudinaryFolder;
+
+    public FileStorageService(
+            @Value("${file.upload-dir:uploads}") String uploadDir,
+            @Value("${cloudinary.url:}") String cloudinaryUrl,
+            @Value("${cloudinary.folder:celebstash}") String cloudinaryFolder) {
         this.fileStorageLocation = Paths.get(uploadDir)
                 .toAbsolutePath().normalize();
+        this.cloudinaryFolder = cloudinaryFolder;
+
+        Cloudinary client = null;
+        if (cloudinaryUrl != null && !cloudinaryUrl.isBlank()) {
+            try {
+                client = new Cloudinary(cloudinaryUrl);
+                client.config.secure = true;
+                log.info("Cloudinary storage enabled (folder '{}'); uploads will be stored remotely.", cloudinaryFolder);
+            } catch (Exception ex) {
+                log.error("CLOUDINARY_URL is set but could not be parsed; falling back to local disk storage. Cause: {}",
+                        ex.getMessage());
+            }
+        } else {
+            log.warn("Cloudinary is not configured — uploads go to the local filesystem '{}'. "
+                    + "On a platform with an ephemeral filesystem these files are lost on redeploy.", this.fileStorageLocation);
+        }
+        this.cloudinary = client;
 
         try {
             Files.createDirectories(this.fileStorageLocation);
         } catch (Exception ex) {
             throw new RuntimeException("Could not create the directory where the uploaded files will be stored.", ex);
+        }
+    }
+
+    /** True when uploads are persisted to Cloudinary rather than the local filesystem. */
+    public boolean isRemoteStorageEnabled() {
+        return cloudinary != null;
+    }
+
+    /**
+     * Store a file and return the URL clients should use to fetch it.
+     *
+     * <p>Returns an absolute Cloudinary CDN URL when remote storage is enabled, otherwise the
+     * local {@code /api/files/{name}} URL, so callers never need to know where a file landed.
+     */
+    public String storeFileAndGetPublicUrl(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("Cannot store empty file.");
+        }
+
+        if (cloudinary != null) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> result = cloudinary.uploader().upload(
+                        file.getBytes(),
+                        ObjectUtils.asMap(
+                                "folder", cloudinaryFolder,
+                                // "auto" lets Cloudinary accept images and video through one call.
+                                "resource_type", "auto",
+                                "public_id", UUID.randomUUID().toString(),
+                                "overwrite", true));
+
+                Object secureUrl = result.get("secure_url");
+                if (secureUrl == null) {
+                    secureUrl = result.get("url");
+                }
+                if (secureUrl == null) {
+                    throw new IllegalStateException("Cloudinary response contained no URL");
+                }
+                return String.valueOf(secureUrl);
+            } catch (Exception ex) {
+                // Surface the failure rather than silently writing somewhere that will be wiped.
+                throw new RuntimeException("Could not upload file to Cloudinary: " + ex.getMessage(), ex);
+            }
+        }
+
+        return toLocalPublicUrl(storeFile(file));
+    }
+
+    /** Store several files, returning their public URLs in the same order. */
+    public List<String> storeFilesAndGetPublicUrls(List<MultipartFile> files) {
+        List<String> urls = new ArrayList<>();
+        if (files != null) {
+            for (MultipartFile file : files) {
+                urls.add(storeFileAndGetPublicUrl(file));
+            }
+        }
+        return urls;
+    }
+
+    /**
+     * Builds the absolute URL for a locally stored file, falling back to a root-relative path when
+     * there is no request bound to the thread (the clients resolve a leading "/" themselves).
+     */
+    private String toLocalPublicUrl(String fileName) {
+        try {
+            return ServletUriComponentsBuilder.fromCurrentContextPath()
+                    .path("/api/files/")
+                    .path(fileName)
+                    .toUriString();
+        } catch (IllegalStateException ex) {
+            return "/api/files/" + fileName;
         }
     }
 
