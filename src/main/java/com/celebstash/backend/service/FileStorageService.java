@@ -105,7 +105,7 @@ public class FileStorageService {
                 if (secureUrl == null) {
                     throw new IllegalStateException("Cloudinary response contained no URL");
                 }
-                return String.valueOf(secureUrl);
+                return withAutoFormat(String.valueOf(secureUrl), String.valueOf(result.get("resource_type")));
             } catch (Exception ex) {
                 // Surface the failure rather than silently writing somewhere that will be wiped.
                 throw new RuntimeException("Could not upload file to Cloudinary: " + ex.getMessage(), ex);
@@ -124,6 +124,29 @@ public class FileStorageService {
             }
         }
         return urls;
+    }
+
+    /**
+     * Adds Cloudinary's {@code f_auto,q_auto} delivery transformation to an upload URL.
+     *
+     * <p>Phones upload in their native formats — iOS sends HEIC, which no mainstream browser can
+     * render, so the stored image loads on the phone but shows as a broken image in the dashboard.
+     * {@code f_auto} makes Cloudinary transcode per request (WebP for Chrome, JPEG elsewhere) and
+     * {@code q_auto} trims the payload, without re-encoding anything at upload time.
+     *
+     * <p>Only applied to image and video assets; {@code raw} files have no transformation pipeline.
+     */
+    private String withAutoFormat(String url, String resourceType) {
+        if (url == null || !("image".equals(resourceType) || "video".equals(resourceType))) {
+            return url;
+        }
+        final String marker = "/upload/";
+        int idx = url.indexOf(marker);
+        if (idx < 0) {
+            return url;
+        }
+        int insertAt = idx + marker.length();
+        return url.substring(0, insertAt) + "f_auto,q_auto/" + url.substring(insertAt);
     }
 
     /**
