@@ -22,7 +22,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -39,6 +41,8 @@ public class PostService {
     private final FollowerRepository followerRepository;
     private final NotificationService notificationService;
     private final ArtistApplicationRepository artistApplicationRepository;
+    private final PostSaveRepository postSaveRepository;
+    private final PostRepostRepository postRepostRepository;
 
     @Transactional
     public PostResponse createPost(PostRequest request, Long userId) {
@@ -163,8 +167,45 @@ public class PostService {
         User currentUser = userRepository.findById(userId)
                 .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
 
-        return postRepository.findPostsSavedBy(currentUser, pageable)
-                .map(post -> mapToResponse(post, currentUser));
+        return postSaveRepository.findByUserIdWithPostOrderByCreatedAtDesc(userId, pageable)
+                .map(ps -> mapToResponse(ps.getPost(), currentUser));
+    }
+
+    // ----------------- REPOSTED POSTS (CURRENT USER) -----------------
+    @Transactional(readOnly = true)
+    public Page<PostResponse> getRepostedPosts(Long userId, Pageable pageable) {
+        User currentUser = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+
+        return postRepostRepository.findByUserIdWithPostOrderByCreatedAtDesc(userId, pageable)
+                .map(pr -> {
+                    PostResponse res = mapToResponse(pr.getPost(), currentUser);
+                    res.setIsRepost(true);
+                    res.setReposterId(pr.getUser().getId());
+                    res.setReposterName(pr.getUser().getFullName());
+                    res.setReposterUsername(pr.getUser().getUsername());
+                    res.setRepostedAt(pr.getCreatedAt());
+                    return res;
+                });
+    }
+
+    // ----------------- REPOSTED POSTS (TARGET USER PUBLIC) -----------------
+    @Transactional(readOnly = true)
+    public Page<PostResponse> getUserRepostedPosts(Long targetUserId, Long currentUserId, Pageable pageable) {
+        User currentUser = currentUserId != null ? userRepository.findById(currentUserId).orElse(null) : null;
+        userRepository.findById(targetUserId)
+                .orElseThrow(() -> new AppException("Target user not found", HttpStatus.NOT_FOUND));
+
+        return postRepostRepository.findByUserIdWithPostOrderByCreatedAtDesc(targetUserId, pageable)
+                .map(pr -> {
+                    PostResponse res = mapToResponse(pr.getPost(), currentUser);
+                    res.setIsRepost(true);
+                    res.setReposterId(pr.getUser().getId());
+                    res.setReposterName(pr.getUser().getFullName());
+                    res.setReposterUsername(pr.getUser().getUsername());
+                    res.setRepostedAt(pr.getCreatedAt());
+                    return res;
+                });
     }
 
     // ----------------- SINGLE POST BY ID -----------------
@@ -215,6 +256,14 @@ public class PostService {
             }
         }
 
+        if (post.getLikedBy() == null) {
+            post.setLikedBy(new ArrayList<>());
+        }
+        if (!post.getLikedBy().contains(user)) {
+            post.getLikedBy().add(user);
+            postRepository.save(post);
+        }
+
         return mapToResponse(post, user);
     }
 
@@ -224,12 +273,17 @@ public class PostService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
 
-        likeRepository.findByUserAndLikeableTypeAndLikeableId(
+        likeRepository.deleteByUserAndLikeableTypeAndLikeableId(
                 user, LikeableType.POST, postId
-        ).ifPresent(likeRepository::delete);
+        );
 
         Post post = postRepository.findById(postId)
                 .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
+
+        if (post.getLikedBy() != null) {
+            post.getLikedBy().remove(user);
+            postRepository.save(post);
+        }
 
         return mapToResponse(post, user);
     }
@@ -243,9 +297,13 @@ public class PostService {
         Post post = postRepository.findById(postId)
                 .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
 
-        if (!post.getRepostedBy().contains(user)) {
-            post.getRepostedBy().add(user);
-            postRepository.save(post);
+        if (!postRepostRepository.existsByUserIdAndPostId(userId, postId)) {
+            PostRepost postRepost = PostRepost.builder()
+                    .user(user)
+                    .post(post)
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            postRepostRepository.save(postRepost);
 
             if (!post.getUser().getId().equals(userId)) {
                 try {
@@ -262,6 +320,11 @@ public class PostService {
             }
         }
 
+        if (post.getRepostedBy() != null && !post.getRepostedBy().contains(user)) {
+            post.getRepostedBy().add(user);
+            postRepository.save(post);
+        }
+
         return mapToResponse(post, user);
     }
 
@@ -274,8 +337,12 @@ public class PostService {
         Post post = postRepository.findById(postId)
                 .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
 
-        post.getRepostedBy().remove(user);
-        postRepository.save(post);
+        postRepostRepository.deleteByUserIdAndPostId(userId, postId);
+
+        if (post.getRepostedBy() != null) {
+            post.getRepostedBy().remove(user);
+            postRepository.save(post);
+        }
 
         return mapToResponse(post, user);
     }
@@ -289,7 +356,16 @@ public class PostService {
         Post post = postRepository.findById(postId)
                 .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
 
-        if (!post.getSavedBy().contains(user)) {
+        if (!postSaveRepository.existsByUserIdAndPostId(userId, postId)) {
+            PostSave postSave = PostSave.builder()
+                    .user(user)
+                    .post(post)
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            postSaveRepository.save(postSave);
+        }
+
+        if (post.getSavedBy() != null && !post.getSavedBy().contains(user)) {
             post.getSavedBy().add(user);
             postRepository.save(post);
         }
@@ -306,8 +382,12 @@ public class PostService {
         Post post = postRepository.findById(postId)
                 .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
 
-        post.getSavedBy().remove(user);
-        postRepository.save(post);
+        postSaveRepository.deleteByUserIdAndPostId(userId, postId);
+
+        if (post.getSavedBy() != null) {
+            post.getSavedBy().remove(user);
+            postRepository.save(post);
+        }
 
         return mapToResponse(post, user);
     }
@@ -315,8 +395,12 @@ public class PostService {
     // ----------------- COMMENTS FOR POST -----------------
     @Transactional(readOnly = true)
     public Page<CommentResponse> getPostComments(Long postId, Pageable pageable, Long userId) {
-        User currentUser = userRepository.findById(userId)
-                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+        // userId may be null when called from an unauthenticated context (the
+        // GET comments endpoint does not require auth). Use optional lookup so
+        // we never throw "User not found" just because the token was absent.
+        User currentUser = (userId != null)
+                ? userRepository.findById(userId).orElse(null)
+                : null;
 
         Post post = postRepository.findById(postId)
                 .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
@@ -338,6 +422,10 @@ public class PostService {
         if (request.getParentId() != null) {
             parent = commentRepository.findById(request.getParentId())
                     .orElseThrow(() -> new AppException("Parent comment not found", HttpStatus.NOT_FOUND));
+            // Flatten to top-level comment so all replies belong to the thread root
+            while (parent.getParent() != null) {
+                parent = parent.getParent();
+            }
         }
 
         Comment comment = Comment.builder()
@@ -351,6 +439,29 @@ public class PostService {
                 .build();
 
         Comment savedComment = commentRepository.save(comment);
+
+        if (parent != null) {
+            if (parent.getReplies() == null) {
+                parent.setReplies(new java.util.HashSet<>());
+            }
+            parent.getReplies().add(savedComment);
+            commentRepository.save(parent);
+
+            // Notify parent comment owner if commenter is not the parent comment author
+            if (!parent.getUser().getId().equals(userId)) {
+                try {
+                    notificationService.createNotification(
+                            parent.getUser(),
+                            "New Reply",
+                            user.getFullName() + " replied to your comment: " + (comment.getContent().length() > 50 ? comment.getContent().substring(0, 50) + "..." : comment.getContent()),
+                            NotificationType.COMMENT,
+                            postId
+                    );
+                } catch (Exception e) {
+                    log.error("Failed to create reply notification: {}", e.getMessage());
+                }
+            }
+        }
 
         // Notify post owner if commenter is not post author
         if (!post.getUser().getId().equals(userId)) {
@@ -482,8 +593,8 @@ public class PostService {
         Comment parent = commentRepository.findById(commentId)
                 .orElseThrow(() -> new AppException("Comment not found", HttpStatus.NOT_FOUND));
 
-        return commentRepository.findByParent(parent, pageable)
-                .map(reply -> mapToCommentResponse(reply, currentUser));
+        return commentRepository.findByParentOrderByCreatedAtAsc(parent, pageable)
+                .map(reply -> mapToCommentResponseSimple(reply, currentUser));
     }
 
     // ----------------- UPDATE POST -----------------
@@ -540,19 +651,59 @@ public class PostService {
     // ----------------- MAPPERS -----------------
     private PostResponse mapToResponse(Post post, User currentUser) {
         long likesCount = likeRepository.countByLikeableTypeAndLikeableId(LikeableType.POST, post.getId());
+        // Count all comments on the post (including replies)
         long commentsCount = commentRepository.countByPost(post);
-        long repostsCount = post.getRepostedBy() != null ? post.getRepostedBy().size() : 0;
+        long repostsCount = Math.max(
+                postRepostRepository.countByPost(post),
+                post.getRepostedBy() != null ? post.getRepostedBy().size() : 0
+        );
+        long savesCount = Math.max(
+                postSaveRepository.countByPost(post),
+                post.getSavedBy() != null ? post.getSavedBy().size() : 0
+        );
         long sharesCount = post.getSharedBy() != null ? post.getSharedBy().size() : 0;
 
         boolean isLiked = currentUser != null && likeRepository.existsByUserAndLikeableTypeAndLikeableId(currentUser, LikeableType.POST, post.getId());
-        boolean isReposted = currentUser != null && post.getRepostedBy() != null && post.getRepostedBy().contains(currentUser);
-        boolean isSaved = currentUser != null && post.getSavedBy() != null && post.getSavedBy().contains(currentUser);
+        boolean isReposted = currentUser != null && (
+                postRepostRepository.existsByUserIdAndPostId(currentUser.getId(), post.getId())
+                || (post.getRepostedBy() != null && post.getRepostedBy().contains(currentUser))
+        );
+        boolean isSaved = currentUser != null && (
+                postSaveRepository.existsByUserIdAndPostId(currentUser.getId(), post.getId())
+                || (post.getSavedBy() != null && post.getSavedBy().contains(currentUser))
+        );
         boolean userVerified = post.getUser().getRole() == Role.ARTIST || post.getUser().getRole() == Role.ADMIN;
+
+        String username = post.getUser().getUsername();
+        if (username == null || username.trim().isEmpty()) {
+            username = post.getUser().getFullName() != null
+                    ? post.getUser().getFullName().toLowerCase().replaceAll("\\s+", "")
+                    : "artist";
+        }
+
+        List<Like> recentLikes = null;
+        try {
+            recentLikes = likeRepository.findRecentLikesByPost(post.getId(), org.springframework.data.domain.PageRequest.of(0, 3));
+        } catch (Exception e) {
+            log.warn("Could not load recent likes for post {}: {}", post.getId(), e.getMessage());
+        }
+
+        List<UserPublicDTO> recentLikers = (recentLikes != null) ? recentLikes.stream()
+                .map(Like::getUser)
+                .filter(java.util.Objects::nonNull)
+                .map(u -> UserPublicDTO.builder()
+                        .id(u.getId())
+                        .fullName(u.getFullName())
+                        .username(u.getUsername())
+                        .profilePicture(u.getProfilePicture())
+                        .build())
+                .toList() : new ArrayList<>();
 
         return PostResponse.builder()
                 .id(post.getId())
                 .userId(post.getUser().getId())
                 .userName(post.getUser().getFullName())
+                .userUsername(username)
                 .userImageUrl(post.getUser().getProfilePicture())
                 .userRole(post.getUser().getRole() != null ? post.getUser().getRole().name() : "USER")
                 .userVerified(userVerified)
@@ -563,10 +714,18 @@ public class PostService {
                 .commentsCount(commentsCount)
                 .sharesCount(sharesCount)
                 .repostsCount(repostsCount)
+<<<<<<< HEAD
                 .liked(isLiked)
                 .shared(false)
                 .reposted(isReposted)
                 .saved(isSaved)
+=======
+                .savesCount(savesCount)
+                .isLiked(isLiked)
+                .isShared(false)
+                .isReposted(isReposted)
+                .isSaved(isSaved)
+>>>>>>> d8b0c20a20f1fe235107c9e84bc1b64c7958d5ad
                 .createdAt(post.getCreatedAt())
                 .updatedAt(post.getUpdatedAt())
                 .product(post.getProduct() != null ? mapToProductResponse(post.getProduct()) : null)
@@ -576,17 +735,53 @@ public class PostService {
                 .attachedTitle(post.getAttachedTitle())
                 .attachedSubtitle(post.getAttachedSubtitle())
                 .attachedPrice(post.getAttachedPrice())
+                .recentLikers(recentLikers)
                 .build();
     }
 
-    private CommentResponse mapToCommentResponse(Comment comment, User currentUser) {
-        List<CommentResponse> replies = (comment.getReplies() != null)
-                ? comment.getReplies().stream().map(r -> mapToCommentResponse(r, currentUser)).toList()
-                : new ArrayList<>();
+    private Instant toInstant(LocalDateTime ldt) {
+        if (ldt == null) return null;
+        return ldt.atZone(ZoneId.systemDefault()).toInstant();
+    }
 
-        int likesCount = (comment.getLikedBy() != null) ? comment.getLikedBy().size() : 0;
-        int repliesCount = (comment.getReplies() != null) ? comment.getReplies().size() : 0;
-        boolean isLiked = (comment.getLikedBy() != null && currentUser != null) ? comment.getLikedBy().contains(currentUser) : false;
+    private CommentResponse mapToCommentResponse(Comment comment, User currentUser) {
+        if (comment == null) return null;
+
+        List<CommentResponse> replies = new ArrayList<>();
+        int repliesCount = 0;
+        try {
+            List<Comment> replyList = commentRepository.findByParentOrderByCreatedAtAsc(comment);
+            if (replyList != null) {
+                repliesCount = replyList.size();
+                replies = replyList.stream()
+                        .limit(3)
+                        .map(r -> mapToCommentResponseSimple(r, currentUser))
+                        .toList();
+            }
+        } catch (Exception e) {
+            log.warn("Could not load replies for comment {}: {}", comment.getId(), e.getMessage());
+        }
+
+        int likesCount = 0;
+        boolean isLiked = false;
+        try {
+            if (comment.getLikedBy() != null) {
+                likesCount = comment.getLikedBy().size();
+                if (currentUser != null) {
+                    isLiked = comment.isLikedBy(currentUser);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Could not load likes for comment {}: {}", comment.getId(), e.getMessage());
+        }
+
+        Long parentId = comment.getParent() != null ? comment.getParent().getId() : null;
+        Long parentUserId = comment.getParent() != null && comment.getParent().getUser() != null ? comment.getParent().getUser().getId() : null;
+        String parentUserName = comment.getParent() != null && comment.getParent().getUser() != null
+                ? (comment.getParent().getUser().getUsername() != null ? comment.getParent().getUser().getUsername() : comment.getParent().getUser().getFullName())
+                : null;
+        boolean isReply = comment.isReply();
+        boolean isSelfReply = isReply && comment.getUser() != null && parentUserId != null && comment.getUser().getId().equals(parentUserId);
 
         return CommentResponse.builder()
                 .id(comment.getId())
@@ -596,14 +791,70 @@ public class PostService {
                 .userUsername(comment.getUser() != null ? comment.getUser().getUsername() : null)
                 .userImageUrl(comment.getUser() != null ? comment.getUser().getProfilePicture() : null)
                 .content(comment.getContent())
+<<<<<<< HEAD
                 .createdAt(comment.getCreatedAt())
                 .updatedAt(comment.getUpdatedAt())
                 .parentId(comment.getParent() != null ? comment.getParent().getId() : null)
                 .reply(comment.isReply())
+=======
+                .createdAt(toInstant(comment.getCreatedAt()))
+                .updatedAt(toInstant(comment.getUpdatedAt()))
+                .parentId(parentId)
+                .parentUserId(parentUserId)
+                .parentUserName(parentUserName)
+                .isReply(isReply)
+                .isSelfReply(isSelfReply)
+>>>>>>> d8b0c20a20f1fe235107c9e84bc1b64c7958d5ad
                 .likesCount(likesCount)
                 .repliesCount(repliesCount)
                 .liked(isLiked)
                 .replies(replies)
+                .build();
+    }
+
+    private CommentResponse mapToCommentResponseSimple(Comment comment, User currentUser) {
+        if (comment == null) return null;
+
+        int likesCount = 0;
+        boolean isLiked = false;
+        try {
+            if (comment.getLikedBy() != null) {
+                likesCount = comment.getLikedBy().size();
+                if (currentUser != null) {
+                    isLiked = comment.isLikedBy(currentUser);
+                }
+            }
+        } catch (Exception e) {
+            // ignore
+        }
+
+        Long parentId = comment.getParent() != null ? comment.getParent().getId() : null;
+        Long parentUserId = comment.getParent() != null && comment.getParent().getUser() != null ? comment.getParent().getUser().getId() : null;
+        String parentUserName = comment.getParent() != null && comment.getParent().getUser() != null
+                ? (comment.getParent().getUser().getUsername() != null ? comment.getParent().getUser().getUsername() : comment.getParent().getUser().getFullName())
+                : null;
+        boolean isReply = comment.isReply();
+        boolean isSelfReply = isReply && comment.getUser() != null && parentUserId != null && comment.getUser().getId().equals(parentUserId);
+
+        return CommentResponse.builder()
+                .id(comment.getId())
+                .postId(comment.getPost() != null ? comment.getPost().getId() : null)
+                .userId(comment.getUser() != null ? comment.getUser().getId() : null)
+                .userName(comment.getUser() != null ? comment.getUser().getFullName() : "Anonymous")
+                .userUsername(comment.getUser() != null ? comment.getUser().getUsername() : null)
+                .userImageUrl(comment.getUser() != null ? comment.getUser().getProfilePicture() : null)
+                .content(comment.getContent())
+                .createdAt(toInstant(comment.getCreatedAt()))
+                .updatedAt(toInstant(comment.getUpdatedAt()))
+                .parentId(parentId)
+                .parentUserId(parentUserId)
+                .parentUserName(parentUserName)
+                .isReply(isReply)
+                .isSelfReply(isSelfReply)
+                .likesCount(likesCount)
+                .repliesCount(0)
+                .isLiked(isLiked)
+                .replies(new ArrayList<>())
                 .build();
     }
 
@@ -612,11 +863,19 @@ public class PostService {
         Post post = postRepository.findById(postId)
                 .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
 
-        if (post.getLikedBy() == null) {
-            return new ArrayList<>();
+        List<User> likers = new ArrayList<>();
+        if (post.getLikedBy() != null && !post.getLikedBy().isEmpty()) {
+            likers.addAll(post.getLikedBy());
+        } else {
+            List<Like> likes = likeRepository.findAllByLikeableTypeAndLikeableId(LikeableType.POST, postId);
+            for (Like l : likes) {
+                if (l.getUser() != null && !likers.contains(l.getUser())) {
+                    likers.add(l.getUser());
+                }
+            }
         }
 
-        return post.getLikedBy().stream()
+        return likers.stream()
                 .map(user -> UserPublicDTO.builder()
                         .id(user.getId())
                         .fullName(user.getFullName())

@@ -6,6 +6,7 @@ import com.celebstash.backend.dto.post.PostRequest;
 import com.celebstash.backend.dto.post.PostResponse;
 import com.celebstash.backend.exception.AppException;
 import com.celebstash.backend.model.User;
+import com.celebstash.backend.repository.UserRepository;
 import com.celebstash.backend.service.PostService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -28,6 +29,7 @@ import org.springframework.web.bind.annotation.*;
 public class PostController {
 
     private final PostService postService;
+    private final UserRepository userRepository;
 
     // ------------------ CREATE POST ------------------
     @PostMapping
@@ -57,7 +59,7 @@ public class PostController {
     }
 
     // ------------------ GET ARTIST PROFILE POSTS ------------------
-    @GetMapping("/user/{targetUserId}")
+    @GetMapping({"/user/{targetUserId:[0-9]+}", "/artist/{targetUserId:[0-9]+}"})
     @Operation(summary = "Get artist profile posts", description = "Returns posts created by a specific user/artist")
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<Page<PostResponse>> getArtistPosts(
@@ -69,12 +71,21 @@ public class PostController {
     }
 
     // ------------------ GET MY POSTS ------------------
-    @GetMapping("/my-posts")
+    @GetMapping({"/my-posts", "/me"})
     @Operation(summary = "Get my posts", description = "Returns all posts by the current logged-in artist")
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<Page<PostResponse>> getMyPosts(@PageableDefault(size = 10) Pageable pageable) {
-        Long userId = getCurrentUserId();
+        Long userId = getRequiredCurrentUserId();
         return ResponseEntity.ok(postService.getMyPosts(userId, pageable));
+    }
+
+    // ------------------ GET REPOSTED POSTS ------------------
+    @GetMapping("/reposted")
+    @Operation(summary = "Get reposted posts", description = "Returns reposted posts for current user")
+    @SecurityRequirement(name = "bearerAuth")
+    public ResponseEntity<Page<PostResponse>> getRepostedPosts(@PageableDefault(size = 10) Pageable pageable) {
+        Long userId = getRequiredCurrentUserId();
+        return ResponseEntity.ok(postService.getRepostedPosts(userId, pageable));
     }
 
     // ------------------ GET SAVED POSTS ------------------
@@ -82,12 +93,38 @@ public class PostController {
     @Operation(summary = "Get saved posts", description = "Returns saved posts for current user")
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<Page<PostResponse>> getSavedPosts(@PageableDefault(size = 10) Pageable pageable) {
-        Long userId = getCurrentUserId();
+        Long userId = getRequiredCurrentUserId();
         return ResponseEntity.ok(postService.getSavedPosts(userId, pageable));
     }
 
+    // ------------------ GET USER'S REPOSTED POSTS (PUBLIC) ------------------
+    @GetMapping("/user/{targetUserId:[0-9]+}/reposts")
+    @Operation(summary = "Get user's reposted posts", description = "Returns public reposted posts for a specific user")
+    public ResponseEntity<Page<PostResponse>> getUserRepostedPosts(
+            @PathVariable("targetUserId") Long targetUserId,
+            @PageableDefault(size = 10) Pageable pageable
+    ) {
+        Long currentUserId = getCurrentUserId();
+        return ResponseEntity.ok(postService.getUserRepostedPosts(targetUserId, currentUserId, pageable));
+    }
+
+    // ------------------ GET USER'S SAVED POSTS (PRIVATE) ------------------
+    @GetMapping("/user/{targetUserId:[0-9]+}/saved")
+    @Operation(summary = "Get user's saved posts", description = "Returns private saved posts (strictly owner only)")
+    @SecurityRequirement(name = "bearerAuth")
+    public ResponseEntity<Page<PostResponse>> getUserSavedPosts(
+            @PathVariable("targetUserId") Long targetUserId,
+            @PageableDefault(size = 10) Pageable pageable
+    ) {
+        Long currentUserId = getRequiredCurrentUserId();
+        if (!currentUserId.equals(targetUserId)) {
+            throw new AppException("You are not authorized to view another user's saved posts", HttpStatus.FORBIDDEN);
+        }
+        return ResponseEntity.ok(postService.getSavedPosts(currentUserId, pageable));
+    }
+
     // ------------------ GET POST BY ID ------------------
-    @GetMapping("/{id}")
+    @GetMapping("/{id:[0-9]+}")
     @Operation(summary = "Get post by ID", description = "Returns a post by its ID")
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<PostResponse> getPostById(@PathVariable("id") Long postId) {
@@ -122,7 +159,7 @@ public class PostController {
     @Operation(summary = "Like post", description = "Likes a post")
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<PostResponse> likePost(@PathVariable("id") Long postId) {
-        Long userId = getCurrentUserId();
+        Long userId = getRequiredCurrentUserId();
         return ResponseEntity.ok(postService.likePost(postId, userId));
     }
 
@@ -131,7 +168,7 @@ public class PostController {
     @Operation(summary = "Unlike post", description = "Unlikes a post")
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<PostResponse> unlikePost(@PathVariable("id") Long postId) {
-        Long userId = getCurrentUserId();
+        Long userId = getRequiredCurrentUserId();
         return ResponseEntity.ok(postService.unlikePost(postId, userId));
     }
 
@@ -148,7 +185,7 @@ public class PostController {
     @Operation(summary = "Repost post", description = "Reposts a post")
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<PostResponse> repostPost(@PathVariable("id") Long postId) {
-        Long userId = getCurrentUserId();
+        Long userId = getRequiredCurrentUserId();
         return ResponseEntity.ok(postService.repostPost(postId, userId));
     }
 
@@ -157,7 +194,7 @@ public class PostController {
     @Operation(summary = "Unrepost post", description = "Removes repost of a post")
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<PostResponse> unrepostPost(@PathVariable("id") Long postId) {
-        Long userId = getCurrentUserId();
+        Long userId = getRequiredCurrentUserId();
         return ResponseEntity.ok(postService.unrepostPost(postId, userId));
     }
 
@@ -166,7 +203,7 @@ public class PostController {
     @Operation(summary = "Save post", description = "Saves a post for the current user")
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<PostResponse> savePost(@PathVariable("id") Long postId) {
-        Long userId = getCurrentUserId();
+        Long userId = getRequiredCurrentUserId();
         return ResponseEntity.ok(postService.savePost(postId, userId));
     }
 

@@ -89,7 +89,38 @@ public class DataInitializer implements CommandLineRunner {
             jdbcTemplate.execute("ALTER TABLE posts ALTER COLUMN product_id DROP NOT NULL;");
             jdbcTemplate.execute("UPDATE music_releases SET availability_status = 'UNRELEASED' WHERE availability_status IS NULL;");
             jdbcTemplate.execute("ALTER TABLE music_releases ALTER COLUMN availability_status DROP NOT NULL;");
-            log.info("Successfully dropped legacy user constraints & updated table columns nullability.");
+            jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS stored_files (id BIGSERIAL PRIMARY KEY, file_name VARCHAR(255) NOT NULL UNIQUE, original_file_name VARCHAR(255), content_type VARCHAR(100), size BIGINT, data BYTEA, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);");
+            jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_stored_files_name ON stored_files(file_name);");
+
+            // Ensure post_saves and post_reposts tables and constraints exist
+            jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS post_saves (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE, post_id BIGINT NOT NULL REFERENCES posts(id) ON DELETE CASCADE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, CONSTRAINT uk_post_saves_user_post UNIQUE (user_id, post_id));");
+            jdbcTemplate.execute("ALTER TABLE post_saves ADD COLUMN IF NOT EXISTS id BIGSERIAL PRIMARY KEY;");
+            jdbcTemplate.execute("ALTER TABLE post_saves ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;");
+            jdbcTemplate.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_post_saves_user_post ON post_saves(user_id, post_id);");
+
+            jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS post_reposts (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE, post_id BIGINT NOT NULL REFERENCES posts(id) ON DELETE CASCADE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, CONSTRAINT uk_post_reposts_user_post UNIQUE (user_id, post_id));");
+            jdbcTemplate.execute("ALTER TABLE post_reposts ADD COLUMN IF NOT EXISTS id BIGSERIAL PRIMARY KEY;");
+            jdbcTemplate.execute("ALTER TABLE post_reposts ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;");
+            jdbcTemplate.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_post_reposts_user_post ON post_reposts(user_id, post_id);");
+
+            // Direct-to-Fan Music Release schema updates
+            jdbcTemplate.execute("ALTER TABLE music_releases ADD COLUMN IF NOT EXISTS community_conversation_id BIGINT;");
+            jdbcTemplate.execute("ALTER TABLE music_releases ADD COLUMN IF NOT EXISTS connected_event_id BIGINT;");
+            jdbcTemplate.execute("ALTER TABLE music_releases ADD COLUMN IF NOT EXISTS connected_product_ids VARCHAR(255);");
+            jdbcTemplate.execute("ALTER TABLE music_releases ADD COLUMN IF NOT EXISTS download_allowed BOOLEAN DEFAULT TRUE;");
+            jdbcTemplate.execute("ALTER TABLE music_releases ADD COLUMN IF NOT EXISTS early_access_date TIMESTAMP;");
+
+            jdbcTemplate.execute("ALTER TABLE music_tracks ADD COLUMN IF NOT EXISTS is_bonus_track BOOLEAN DEFAULT FALSE;");
+            jdbcTemplate.execute("ALTER TABLE music_tracks ADD COLUMN IF NOT EXISTS preview_duration_seconds INT DEFAULT 5;");
+            jdbcTemplate.execute("ALTER TABLE music_tracks ADD COLUMN IF NOT EXISTS allow_download BOOLEAN DEFAULT TRUE;");
+
+            jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS release_benefits (id BIGSERIAL PRIMARY KEY, release_id BIGINT NOT NULL REFERENCES music_releases(id) ON DELETE CASCADE, benefit_type VARCHAR(100) NOT NULL, enabled BOOLEAN NOT NULL DEFAULT TRUE, custom_name VARCHAR(255), custom_description VARCHAR(2000), config_data VARCHAR(4000));");
+            jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS music_exclusive_contents (id BIGSERIAL PRIMARY KEY, release_id BIGINT NOT NULL REFERENCES music_releases(id) ON DELETE CASCADE, title VARCHAR(255) NOT NULL, description VARCHAR(2000), content_type VARCHAR(100) NOT NULL DEFAULT 'VIDEO', media_url VARCHAR(500) NOT NULL, thumbnail_url VARCHAR(500), sort_order INT DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);");
+            jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS music_waitlists (id BIGSERIAL PRIMARY KEY, release_id BIGINT NOT NULL REFERENCES music_releases(id) ON DELETE CASCADE, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE, notified BOOLEAN DEFAULT FALSE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, CONSTRAINT uk_music_waitlist_user_release UNIQUE (user_id, release_id));");
+            jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS music_access (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE, release_id BIGINT NOT NULL REFERENCES music_releases(id) ON DELETE CASCADE, transaction_id BIGINT REFERENCES transactions(id), status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE', granted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, is_gift BOOLEAN DEFAULT FALSE, gifted_by_id BIGINT REFERENCES users(id), gift_message VARCHAR(1000), granted_benefits_snapshot VARCHAR(4000), CONSTRAINT uk_music_access_user_release UNIQUE (user_id, release_id));");
+            jdbcTemplate.execute("ALTER TABLE IF EXISTS notifications DROP CONSTRAINT IF EXISTS notifications_type_check;");
+
+            log.info("Successfully dropped legacy user constraints, ensured stored_files, post_saves, post_reposts, and music access tables exist.");
         } catch (Exception e) {
             log.warn("Could not drop legacy constraints/alter columns: {}", e.getMessage());
         }
@@ -113,6 +144,9 @@ public class DataInitializer implements CommandLineRunner {
                 admin.setRole(Role.ADMIN);
                 admin.setStatus(AccountStatus.ACTIVE);
                 admin.setEmailVerified(true);
+                if (admin.getProfilePicture() == null || admin.getProfilePicture().isBlank()) {
+                    admin.setProfilePicture("https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=800");
+                }
                 userRepository.save(admin);
                 log.info("Admin account already present (id={}, email={}); ensured ADMIN/ACTIVE.",
                         admin.getId(), admin.getEmail());
@@ -134,6 +168,7 @@ public class DataInitializer implements CommandLineRunner {
                         .provider(AuthProvider.LOCAL)
                         .emailVerified(true)
                         .phoneVerified(true)
+                        .profilePicture("https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=800")
                         .build();
                 adminUser = userRepository.save(adminUser);
                 Wallet adminWallet = Wallet.builder()

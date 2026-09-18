@@ -47,6 +47,7 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+<<<<<<< HEAD
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .authorizeHttpRequests(auth -> auth
@@ -82,6 +83,39 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authenticationProvider(authenticationProvider())
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+=======
+            .csrf(AbstractHttpConfigurer::disable)
+            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers(
+                    "/api/v1/auth/**",
+                    "/api/files/**",
+                    "/api-docs/**",
+                    "/swagger-ui/**",
+                    "/swagger-ui.html",
+                    "/ws/**"           // WebSocket SockJS handshake
+                ).permitAll()
+                .requestMatchers(org.springframework.http.HttpMethod.GET, 
+                    "/api/files/**",
+                    "/api/posts",
+                    "/api/posts/feed",
+                    "/api/posts/discovery",
+                    "/api/posts/user/**",
+                    "/api/posts/*",
+                    "/api/posts/*/comments",
+                    "/api/posts/*/comments/**",
+                    "/api/follow/users/**",
+                    "/api/music/releases",
+                    "/api/music/releases/**",
+                    "/api/music/tracks/*/stream",
+                    "/api/music/tracks/*/access"
+                ).permitAll()
+                .anyRequest().authenticated()
+            )
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authenticationProvider(authenticationProvider())
+            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+>>>>>>> d8b0c20a20f1fe235107c9e84bc1b64c7958d5ad
 
         return http.build();
     }
