@@ -18,34 +18,54 @@ public interface PostRepository extends JpaRepository<Post, Long> {
 
     // Find all posts by user
     List<Post> findByUser(User user);
-    
+
     // Find all posts by user with pagination
     Page<Post> findByUser(User user, Pageable pageable);
-    
+
     // Find post by product
     Optional<Post> findByProduct(Product product);
-    
+
     // Find all posts by users the current user follows
     @Query("SELECT p FROM Post p WHERE p.user IN :users ORDER BY p.createdAt DESC")
     List<Post> findByUsersOrderByCreatedAtDesc(@Param("users") List<User> users);
-    
+
     // Find all posts by users the current user follows with pagination
     @Query("SELECT p FROM Post p WHERE p.user IN :users ORDER BY p.createdAt DESC")
     Page<Post> findByUsersOrderByCreatedAtDesc(@Param("users") List<User> users, Pageable pageable);
-    
+
     // Find all posts liked by a specific user
     @Query("SELECT p FROM Post p JOIN p.likedBy l WHERE l = :user")
     List<Post> findPostsLikedBy(@Param("user") User user);
-    
+
     // Find all posts liked by a specific user with pagination
     @Query("SELECT p FROM Post p JOIN p.likedBy l WHERE l = :user")
     Page<Post> findPostsLikedBy(@Param("user") User user, Pageable pageable);
-    
+
     // Find all posts shared by a specific user
     @Query("SELECT p FROM Post p JOIN p.sharedBy s WHERE s = :user")
     List<Post> findPostsSharedBy(@Param("user") User user);
-    
+
     // Find all posts shared by a specific user with pagination
     @Query("SELECT p FROM Post p JOIN p.sharedBy s WHERE s = :user")
     Page<Post> findPostsSharedBy(@Param("user") User user, Pageable pageable);
+
+    // Added method to fix the compiler error
+    List<Post> findAllByStatusOrderByCreatedAtDesc(com.celebstash.backend.model.enums.PostStatus status);
+
+    // Paginated discovery feed
+    Page<Post> findAllByStatusOrderByCreatedAtDesc(com.celebstash.backend.model.enums.PostStatus status, Pageable pageable);
+
+    // Paginated all posts ordered by creation date
+    Page<Post> findAllByOrderByCreatedAtDesc(Pageable pageable);
+
+    // Paginated saved posts
+    @Query("SELECT p FROM Post p JOIN p.savedBy s WHERE s = :user ORDER BY p.createdAt DESC")
+    Page<Post> findPostsSavedBy(@Param("user") User user, Pageable pageable);
+
+    // Paginated reposted posts
+    @Query("SELECT p FROM Post p JOIN p.repostedBy r WHERE r = :user ORDER BY p.createdAt DESC")
+    Page<Post> findPostsRepostedBy(@Param("user") User user, Pageable pageable);
+
+    // Find all posts by user ordered by date
+    Page<Post> findByUserOrderByCreatedAtDesc(User user, Pageable pageable);
 }

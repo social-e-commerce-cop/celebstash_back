@@ -18,6 +18,8 @@ public class AuthResponse {
     private long expiresIn;
     private String userId;
     private String fullName;
+    private String username;
+    private String role;
     private String email;
     private String phoneNumber;
     private AccountStatus status;

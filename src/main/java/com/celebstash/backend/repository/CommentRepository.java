@@ -28,18 +28,22 @@ public interface CommentRepository extends JpaRepository<Comment, Long> {
     Page<Comment> findByUser(User user, Pageable pageable);
     
     // Find all top-level comments (not replies) for a post
-    @Query("SELECT c FROM Comment c WHERE c.post = :post AND c.parent IS NULL")
+    @Query("SELECT c FROM Comment c WHERE c.post = :post AND c.parent IS NULL ORDER BY c.createdAt DESC")
     List<Comment> findTopLevelCommentsByPost(@Param("post") Post post);
     
     // Find all top-level comments for a post with pagination
-    @Query("SELECT c FROM Comment c WHERE c.post = :post AND c.parent IS NULL")
+    @Query("SELECT c FROM Comment c WHERE c.post = :post AND c.parent IS NULL ORDER BY c.createdAt DESC")
     Page<Comment> findTopLevelCommentsByPost(@Param("post") Post post, Pageable pageable);
     
     // Find all replies to a comment
     List<Comment> findByParent(Comment parent);
+
+    List<Comment> findByParentOrderByCreatedAtAsc(Comment parent);
     
     // Find all replies to a comment with pagination
     Page<Comment> findByParent(Comment parent, Pageable pageable);
+
+    Page<Comment> findByParentOrderByCreatedAtAsc(Comment parent, Pageable pageable);
     
     // Find all comments liked by a specific user
     @Query("SELECT c FROM Comment c JOIN c.likedBy l WHERE l = :user")
@@ -48,6 +52,9 @@ public interface CommentRepository extends JpaRepository<Comment, Long> {
     // Find all comments liked by a specific user with pagination
     @Query("SELECT c FROM Comment c JOIN c.likedBy l WHERE l = :user")
     Page<Comment> findCommentsLikedBy(@Param("user") User user, Pageable pageable);
+    
+    // Count top-level comments by post
+    long countByPostAndParentIsNull(Post post);
     
     // Count comments by post
     long countByPost(Post post);

@@ -1,27 +1,32 @@
 package com.celebstash.backend.service;
 
+import com.celebstash.backend.dto.comment.CommentRequest;
+import com.celebstash.backend.dto.comment.CommentResponse;
 import com.celebstash.backend.dto.post.PostRequest;
 import com.celebstash.backend.dto.post.PostResponse;
+import com.celebstash.backend.dto.product.ProductResponse;
+import com.celebstash.backend.dto.user.UserPublicDTO;
 import com.celebstash.backend.exception.AppException;
-import com.celebstash.backend.model.Post;
-import com.celebstash.backend.model.Product;
-import com.celebstash.backend.model.User;
+import com.celebstash.backend.model.*;
 import com.celebstash.backend.model.enums.LikeableType;
-import com.celebstash.backend.repository.LikeRepository;
-import com.celebstash.backend.repository.PostRepository;
-import com.celebstash.backend.repository.ProductRepository;
-import com.celebstash.backend.repository.ShareRepository;
+import com.celebstash.backend.model.enums.NotificationType;
+import com.celebstash.backend.model.enums.PostStatus;
+import com.celebstash.backend.model.enums.Role;
+import com.celebstash.backend.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -30,213 +35,861 @@ public class PostService {
 
     private final PostRepository postRepository;
     private final ProductRepository productRepository;
+    private final UserRepository userRepository;
     private final LikeRepository likeRepository;
-    private final ShareRepository shareRepository;
-    private final UserService userService;
+    private final CommentRepository commentRepository;
+    private final FollowerRepository followerRepository;
+    private final NotificationService notificationService;
+    private final ArtistApplicationRepository artistApplicationRepository;
+    private final PostSaveRepository postSaveRepository;
+    private final PostRepostRepository postRepostRepository;
 
-    /**
-     * Create a new post
-     * @param request the post request
-     * @return the created post response
-     */
     @Transactional
-    public PostResponse createPost(PostRequest request) {
-        User currentUser = userService.getCurrentUser();
-        
-        // Validate photo count
-        if (request.getPhotoUrls() == null || request.getPhotoUrls().size() < 3 || request.getPhotoUrls().size() > 5) {
-            throw new AppException("Between 3 and 5 photos are required", HttpStatus.BAD_REQUEST);
+    public PostResponse createPost(PostRequest request, Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+
+        if (user.getRole() != Role.ARTIST && user.getRole() != Role.ADMIN) {
+            user.setRole(Role.ARTIST);
+            userRepository.save(user);
         }
-        
-        // Get the product
-        Product product = productRepository.findById(request.getProductId())
-                .orElseThrow(() -> new AppException("Product not found", HttpStatus.NOT_FOUND));
-        
-        // Only the product owner can create a post for it
-        if (!product.getSeller().getId().equals(currentUser.getId())) {
-            throw new AppException("You can only create posts for your own products", HttpStatus.FORBIDDEN);
+
+        Product product = null;
+        if (request.getProductId() != null) {
+            product = productRepository.findById(request.getProductId())
+                    .orElseThrow(() -> new AppException("Product not found", HttpStatus.NOT_FOUND));
         }
-        
-        // Create the post
-        Post post = Post.builder()
-                .user(currentUser)
-                .product(product)
-                .videoUrl(request.getVideoUrl())
-                .photoUrls(request.getPhotoUrls())
-                .description(request.getDescription())
+
+        Post post = new Post();
+        post.setUser(user);
+        post.setDescription(request.getDescription());
+        post.setVideoUrl(request.getVideoUrl());
+        post.setImageUrls(request.getImageUrls() != null ? request.getImageUrls() : new ArrayList<>());
+        post.setProduct(product);
+        post.setSponsored(request.isSponsored());
+        post.setSponsorName(request.getSponsorName());
+        post.setAttachedType(request.getAttachedType());
+        post.setAttachedTitle(request.getAttachedTitle());
+        post.setAttachedSubtitle(request.getAttachedSubtitle());
+        post.setAttachedPrice(request.getAttachedPrice());
+        post.setStatus(PostStatus.ACTIVE);
+        post.setCreatedAt(LocalDateTime.now());
+
+        Post savedPost;
+        try {
+            savedPost = postRepository.save(post);
+        } catch (Exception e) {
+            log.error("Failed to save post for user {}: {}", userId, e.getMessage(), e);
+            throw new AppException("Could not save post: " + e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+
+        // Notify followers asynchronously
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            try {
+                List<Follower> followers = followerRepository.findByFollowing(user);
+                for (Follower f : followers) {
+                    try {
+                        notificationService.createNotification(
+                                f.getFollower(),
+                                "New Post from " + user.getFullName(),
+                                user.getFullName() + " posted: " + (post.getDescription() != null && post.getDescription().length() > 50 
+                                        ? post.getDescription().substring(0, 50) + "..." : (post.getDescription() != null ? post.getDescription() : "New update")),
+                                NotificationType.STORY_POST_ACTIVITY,
+                                savedPost.getId()
+                        );
+                    } catch (Exception e) {
+                        log.error("Failed to send post notification to follower {}: {}", f.getFollower().getId(), e.getMessage());
+                    }
+                }
+            } catch (Exception e) {
+                log.error("Failed to notify followers for post {}: {}", savedPost.getId(), e.getMessage());
+            }
+        });
+
+        return mapToResponse(savedPost, user);
+    }
+
+    // ----------------- HOME FEED (FOLLOWED ARTISTS + DISCOVERY) -----------------
+    @Transactional(readOnly = true)
+    public Page<PostResponse> getHomeFeed(Long userId, Pageable pageable) {
+        User currentUser = userId != null ? userRepository.findById(userId).orElse(null) : null;
+
+        if (currentUser != null) {
+            List<Follower> following = followerRepository.findByFollower(currentUser);
+            List<User> followedUsers = following.stream().map(Follower::getFollowing).toList();
+
+            if (!followedUsers.isEmpty()) {
+                Page<Post> followedPosts = postRepository.findByUsersOrderByCreatedAtDesc(followedUsers, pageable);
+                if (!followedPosts.isEmpty()) {
+                    return followedPosts.map(post -> mapToResponse(post, currentUser));
+                }
+            }
+        }
+
+        // Fallback to all active posts if no followed posts or unauthenticated
+        return postRepository.findAllByStatusOrderByCreatedAtDesc(PostStatus.ACTIVE, pageable)
+                .map(post -> mapToResponse(post, currentUser));
+    }
+
+    // ----------------- DISCOVERY FEED -----------------
+    @Transactional(readOnly = true)
+    public Page<PostResponse> getDiscoveryFeed(Long userId, Pageable pageable) {
+        User currentUser = userId != null ? userRepository.findById(userId).orElse(null) : null;
+
+        return postRepository.findAllByStatusOrderByCreatedAtDesc(PostStatus.ACTIVE, pageable)
+                .map(post -> mapToResponse(post, currentUser));
+    }
+
+    // ----------------- ARTIST PROFILE POSTS -----------------
+    @Transactional(readOnly = true)
+    public Page<PostResponse> getArtistPosts(Long targetUserId, Long currentUserId, Pageable pageable) {
+        User currentUser = currentUserId != null ? userRepository.findById(currentUserId).orElse(null) : null;
+        User targetUser = userRepository.findById(targetUserId)
+                .orElseThrow(() -> new AppException("Target user not found", HttpStatus.NOT_FOUND));
+
+        return postRepository.findByUserOrderByCreatedAtDesc(targetUser, pageable)
+                .map(post -> mapToResponse(post, currentUser));
+    }
+
+    // ----------------- PAGINATED GET MY POSTS -----------------
+    @Transactional(readOnly = true)
+    public Page<PostResponse> getMyPosts(Long userId, Pageable pageable) {
+        User currentUser = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+
+        return postRepository.findByUserOrderByCreatedAtDesc(currentUser, pageable)
+                .map(post -> mapToResponse(post, currentUser));
+    }
+
+    // ----------------- SAVED POSTS -----------------
+    @Transactional(readOnly = true)
+    public Page<PostResponse> getSavedPosts(Long userId, Pageable pageable) {
+        User currentUser = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+
+        return postSaveRepository.findByUserIdWithPostOrderByCreatedAtDesc(userId, pageable)
+                .map(ps -> mapToResponse(ps.getPost(), currentUser));
+    }
+
+    // ----------------- REPOSTED POSTS (CURRENT USER) -----------------
+    @Transactional(readOnly = true)
+    public Page<PostResponse> getRepostedPosts(Long userId, Pageable pageable) {
+        User currentUser = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+
+        return postRepostRepository.findByUserIdWithPostOrderByCreatedAtDesc(userId, pageable)
+                .map(pr -> {
+                    PostResponse res = mapToResponse(pr.getPost(), currentUser);
+                    res.setIsRepost(true);
+                    res.setReposterId(pr.getUser().getId());
+                    res.setReposterName(pr.getUser().getFullName());
+                    res.setReposterUsername(pr.getUser().getUsername());
+                    res.setRepostedAt(pr.getCreatedAt());
+                    return res;
+                });
+    }
+
+    // ----------------- REPOSTED POSTS (TARGET USER PUBLIC) -----------------
+    @Transactional(readOnly = true)
+    public Page<PostResponse> getUserRepostedPosts(Long targetUserId, Long currentUserId, Pageable pageable) {
+        User currentUser = currentUserId != null ? userRepository.findById(currentUserId).orElse(null) : null;
+        userRepository.findById(targetUserId)
+                .orElseThrow(() -> new AppException("Target user not found", HttpStatus.NOT_FOUND));
+
+        return postRepostRepository.findByUserIdWithPostOrderByCreatedAtDesc(targetUserId, pageable)
+                .map(pr -> {
+                    PostResponse res = mapToResponse(pr.getPost(), currentUser);
+                    res.setIsRepost(true);
+                    res.setReposterId(pr.getUser().getId());
+                    res.setReposterName(pr.getUser().getFullName());
+                    res.setReposterUsername(pr.getUser().getUsername());
+                    res.setRepostedAt(pr.getCreatedAt());
+                    return res;
+                });
+    }
+
+    // ----------------- SINGLE POST BY ID -----------------
+    @Transactional(readOnly = true)
+    public PostResponse getPostById(Long postId, Long userId) {
+        User currentUser = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
+
+        return mapToResponse(post, currentUser);
+    }
+
+    // ----------------- LIKE POST -----------------
+    @Transactional
+    public PostResponse likePost(Long postId, Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
+
+        boolean alreadyLiked = likeRepository.existsByUserAndLikeableTypeAndLikeableId(
+                user, LikeableType.POST, postId
+        );
+
+        if (!alreadyLiked) {
+            Like like = Like.builder()
+                    .user(user)
+                    .likeableType(LikeableType.POST)
+                    .likeableId(postId)
+                    .build();
+            likeRepository.save(like);
+
+            if (!post.getUser().getId().equals(userId)) {
+                try {
+                    notificationService.createNotification(
+                            post.getUser(),
+                            "New Like",
+                            user.getFullName() + " liked your post.",
+                            NotificationType.LIKE,
+                            postId
+                    );
+                } catch (Exception e) {
+                    log.error("Failed to create like notification: {}", e.getMessage());
+                }
+            }
+        }
+
+        if (post.getLikedBy() == null) {
+            post.setLikedBy(new ArrayList<>());
+        }
+        if (!post.getLikedBy().contains(user)) {
+            post.getLikedBy().add(user);
+            postRepository.save(post);
+        }
+
+        return mapToResponse(post, user);
+    }
+
+    // ----------------- UNLIKE POST -----------------
+    @Transactional
+    public PostResponse unlikePost(Long postId, Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+
+        likeRepository.deleteByUserAndLikeableTypeAndLikeableId(
+                user, LikeableType.POST, postId
+        );
+
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
+
+        if (post.getLikedBy() != null) {
+            post.getLikedBy().remove(user);
+            postRepository.save(post);
+        }
+
+        return mapToResponse(post, user);
+    }
+
+    // ----------------- REPOST POST -----------------
+    @Transactional
+    public PostResponse repostPost(Long postId, Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
+
+        if (!postRepostRepository.existsByUserIdAndPostId(userId, postId)) {
+            PostRepost postRepost = PostRepost.builder()
+                    .user(user)
+                    .post(post)
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            postRepostRepository.save(postRepost);
+
+            if (!post.getUser().getId().equals(userId)) {
+                try {
+                    notificationService.createNotification(
+                            post.getUser(),
+                            "New Repost",
+                            user.getFullName() + " reposted your post.",
+                            NotificationType.REPOST,
+                            postId
+                    );
+                } catch (Exception e) {
+                    log.error("Failed to create repost notification: {}", e.getMessage());
+                }
+            }
+        }
+
+        if (post.getRepostedBy() != null && !post.getRepostedBy().contains(user)) {
+            post.getRepostedBy().add(user);
+            postRepository.save(post);
+        }
+
+        return mapToResponse(post, user);
+    }
+
+    // ----------------- UNREPOST POST -----------------
+    @Transactional
+    public PostResponse unrepostPost(Long postId, Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
+
+        postRepostRepository.deleteByUserIdAndPostId(userId, postId);
+
+        if (post.getRepostedBy() != null) {
+            post.getRepostedBy().remove(user);
+            postRepository.save(post);
+        }
+
+        return mapToResponse(post, user);
+    }
+
+    // ----------------- SAVE POST -----------------
+    @Transactional
+    public PostResponse savePost(Long postId, Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
+
+        if (!postSaveRepository.existsByUserIdAndPostId(userId, postId)) {
+            PostSave postSave = PostSave.builder()
+                    .user(user)
+                    .post(post)
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            postSaveRepository.save(postSave);
+        }
+
+        if (post.getSavedBy() != null && !post.getSavedBy().contains(user)) {
+            post.getSavedBy().add(user);
+            postRepository.save(post);
+        }
+
+        return mapToResponse(post, user);
+    }
+
+    // ----------------- UNSAVE POST -----------------
+    @Transactional
+    public PostResponse unsavePost(Long postId, Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
+
+        postSaveRepository.deleteByUserIdAndPostId(userId, postId);
+
+        if (post.getSavedBy() != null) {
+            post.getSavedBy().remove(user);
+            postRepository.save(post);
+        }
+
+        return mapToResponse(post, user);
+    }
+
+    // ----------------- COMMENTS FOR POST -----------------
+    @Transactional(readOnly = true)
+    public Page<CommentResponse> getPostComments(Long postId, Pageable pageable, Long userId) {
+        // userId may be null when called from an unauthenticated context (the
+        // GET comments endpoint does not require auth). Use optional lookup so
+        // we never throw "User not found" just because the token was absent.
+        User currentUser = (userId != null)
+                ? userRepository.findById(userId).orElse(null)
+                : null;
+
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
+
+        return commentRepository.findTopLevelCommentsByPost(post, pageable)
+                .map(comment -> mapToCommentResponse(comment, currentUser));
+    }
+
+    // ----------------- ADD COMMENT -----------------
+    @Transactional
+    public CommentResponse addComment(Long postId, CommentRequest request, Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
+
+        Comment parent = null;
+        if (request.getParentId() != null) {
+            parent = commentRepository.findById(request.getParentId())
+                    .orElseThrow(() -> new AppException("Parent comment not found", HttpStatus.NOT_FOUND));
+            // Flatten to top-level comment so all replies belong to the thread root
+            while (parent.getParent() != null) {
+                parent = parent.getParent();
+            }
+        }
+
+        Comment comment = Comment.builder()
+                .post(post)
+                .user(user)
+                .content(request.getContent())
+                .parent(parent)
+                .likedBy(new java.util.HashSet<>())
+                .replies(new java.util.HashSet<>())
                 .createdAt(LocalDateTime.now())
                 .build();
-        
-        Post savedPost = postRepository.save(post);
-        
-        return mapToPostResponse(savedPost, currentUser);
+
+        Comment savedComment = commentRepository.save(comment);
+
+        if (parent != null) {
+            if (parent.getReplies() == null) {
+                parent.setReplies(new java.util.HashSet<>());
+            }
+            parent.getReplies().add(savedComment);
+            commentRepository.save(parent);
+
+            // Notify parent comment owner if commenter is not the parent comment author
+            if (!parent.getUser().getId().equals(userId)) {
+                try {
+                    notificationService.createNotification(
+                            parent.getUser(),
+                            "New Reply",
+                            user.getFullName() + " replied to your comment: " + (comment.getContent().length() > 50 ? comment.getContent().substring(0, 50) + "..." : comment.getContent()),
+                            NotificationType.COMMENT,
+                            postId
+                    );
+                } catch (Exception e) {
+                    log.error("Failed to create reply notification: {}", e.getMessage());
+                }
+            }
+        }
+
+        // Notify post owner if commenter is not post author
+        if (!post.getUser().getId().equals(userId)) {
+            try {
+                notificationService.createNotification(
+                        post.getUser(),
+                        "New Comment",
+                        user.getFullName() + " commented: " + (comment.getContent().length() > 50 ? comment.getContent().substring(0, 50) + "..." : comment.getContent()),
+                        NotificationType.COMMENT,
+                        postId
+                );
+            } catch (Exception e) {
+                log.error("Failed to create comment notification: {}", e.getMessage());
+            }
+        }
+
+        // Tagged users (@username) notification processing
+        if (request.getContent() != null && request.getContent().contains("@")) {
+            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("@([a-zA-Z0-9_.]+)");
+            java.util.regex.Matcher matcher = pattern.matcher(request.getContent());
+            java.util.Set<String> taggedUsernames = new java.util.HashSet<>();
+            while (matcher.find()) {
+                taggedUsernames.add(matcher.group(1).toLowerCase());
+            }
+            for (String username : taggedUsernames) {
+                userRepository.findByUsername(username).ifPresent(taggedUser -> {
+                    if (!taggedUser.getId().equals(userId)) {
+                        try {
+                            notificationService.createNotification(
+                                    taggedUser,
+                                    "Mentioned in Comment",
+                                    user.getFullName() + " tagged you in a comment",
+                                    NotificationType.COMMENT,
+                                    postId
+                            );
+                        } catch (Exception e) {
+                            log.error("Failed to create tag notification for {}: {}", username, e.getMessage());
+                        }
+                    }
+                });
+            }
+        }
+
+        return mapToCommentResponse(savedComment, user);
     }
 
-    /**
-     * Get all posts
-     * @param pageable pagination information
-     * @return page of post responses
-     */
-    @Transactional(readOnly = true)
-    public Page<PostResponse> getAllPosts(Pageable pageable) {
-        User currentUser = userService.getCurrentUser();
-        Page<Post> posts = postRepository.findAll(pageable);
-        
-        return posts.map(post -> mapToPostResponse(post, currentUser));
-    }
-
-    /**
-     * Get a post by ID
-     * @param postId the post ID
-     * @return the post response
-     */
-    @Transactional(readOnly = true)
-    public PostResponse getPostById(Long postId) {
-        User currentUser = userService.getCurrentUser();
-        Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
-        
-        return mapToPostResponse(post, currentUser);
-    }
-
-    /**
-     * Get all posts by the current user
-     * @param pageable pagination information
-     * @return page of post responses
-     */
-    @Transactional(readOnly = true)
-    public Page<PostResponse> getMyPosts(Pageable pageable) {
-        User currentUser = userService.getCurrentUser();
-        Page<Post> posts = postRepository.findByUser(currentUser, pageable);
-        
-        return posts.map(post -> mapToPostResponse(post, currentUser));
-    }
-
-    /**
-     * Update a post
-     * @param postId the post ID
-     * @param request the post request
-     * @return the updated post response
-     */
+    // ----------------- LIKE COMMENT -----------------
     @Transactional
-    public PostResponse updatePost(Long postId, PostRequest request) {
-        User currentUser = userService.getCurrentUser();
-        
-        // Validate photo count
-        if (request.getPhotoUrls() == null || request.getPhotoUrls().size() < 3 || request.getPhotoUrls().size() > 5) {
-            throw new AppException("Between 3 and 5 photos are required", HttpStatus.BAD_REQUEST);
+    public CommentResponse likeComment(Long commentId, Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+        Comment comment = commentRepository.findById(commentId)
+                .orElseThrow(() -> new AppException("Comment not found", HttpStatus.NOT_FOUND));
+
+        comment.addLike(user);
+        commentRepository.save(comment);
+
+        // Notify comment owner (not self)
+        if (!comment.getUser().getId().equals(userId)) {
+            try {
+                notificationService.createNotification(
+                        comment.getUser(),
+                        "Comment Liked",
+                        user.getFullName() + " liked your comment",
+                        NotificationType.LIKE,
+                        comment.getPost() != null ? comment.getPost().getId() : null
+                );
+            } catch (Exception e) {
+                log.error("Failed to create comment like notification: {}", e.getMessage());
+            }
         }
-        
+        return mapToCommentResponse(comment, user);
+    }
+
+    // ----------------- UNLIKE COMMENT -----------------
+    @Transactional
+    public CommentResponse unlikeComment(Long commentId, Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+        Comment comment = commentRepository.findById(commentId)
+                .orElseThrow(() -> new AppException("Comment not found", HttpStatus.NOT_FOUND));
+
+        comment.removeLike(user);
+        commentRepository.save(comment);
+        return mapToCommentResponse(comment, user);
+    }
+
+    // ----------------- EDIT COMMENT -----------------
+    @Transactional
+    public CommentResponse editComment(Long commentId, CommentRequest request, Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+        Comment comment = commentRepository.findById(commentId)
+                .orElseThrow(() -> new AppException("Comment not found", HttpStatus.NOT_FOUND));
+
+        if (!comment.getUser().getId().equals(userId)) {
+            throw new AppException("You are not authorized to edit this comment", HttpStatus.FORBIDDEN);
+        }
+        if (request.getContent() == null || request.getContent().isBlank()) {
+            throw new AppException("Comment content cannot be empty", HttpStatus.BAD_REQUEST);
+        }
+
+        comment.setContent(request.getContent().trim());
+        commentRepository.save(comment);
+        return mapToCommentResponse(comment, user);
+    }
+
+    // ----------------- DELETE COMMENT -----------------
+    @Transactional
+    public void deleteComment(Long commentId, Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+        Comment comment = commentRepository.findById(commentId)
+                .orElseThrow(() -> new AppException("Comment not found", HttpStatus.NOT_FOUND));
+
+        if (!comment.getUser().getId().equals(userId)) {
+            throw new AppException("You are not authorized to delete this comment", HttpStatus.FORBIDDEN);
+        }
+        if (comment.getParent() != null && comment.getParent().getReplies() != null) {
+            comment.getParent().getReplies().remove(comment);
+        }
+        commentRepository.delete(comment);
+    }
+
+    // ----------------- GET COMMENT REPLIES (PAGINATED) -----------------
+    @Transactional(readOnly = true)
+    public Page<CommentResponse> getCommentReplies(Long commentId, Pageable pageable, Long userId) {
+        User currentUser = userId != null ? userRepository.findById(userId).orElse(null) : null;
+        Comment parent = commentRepository.findById(commentId)
+                .orElseThrow(() -> new AppException("Comment not found", HttpStatus.NOT_FOUND));
+
+        return commentRepository.findByParentOrderByCreatedAtAsc(parent, pageable)
+                .map(reply -> mapToCommentResponseSimple(reply, currentUser));
+    }
+
+    // ----------------- UPDATE POST -----------------
+    @Transactional
+    public PostResponse updatePost(Long postId, PostRequest request, Long userId) {
+        User currentUser = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+
         Post post = postRepository.findById(postId)
                 .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
-        
-        // Only the post owner can update it
-        if (!post.getUser().getId().equals(currentUser.getId())) {
-            throw new AppException("You can only update your own posts", HttpStatus.FORBIDDEN);
+
+        if (!post.getUser().getId().equals(userId)) {
+            throw new AppException("You are not authorized to update this post", HttpStatus.FORBIDDEN);
         }
-        
-        // Update the post
-        post.setVideoUrl(request.getVideoUrl());
-        post.setPhotoUrls(request.getPhotoUrls());
+
         post.setDescription(request.getDescription());
+        post.setVideoUrl(request.getVideoUrl());
+        if (request.getImageUrls() != null) {
+            post.setImageUrls(request.getImageUrls());
+        }
+        post.setAttachedType(request.getAttachedType());
+        post.setAttachedTitle(request.getAttachedTitle());
+        post.setAttachedSubtitle(request.getAttachedSubtitle());
+        post.setAttachedPrice(request.getAttachedPrice());
+
+        if (request.getProductId() != null) {
+            Product product = productRepository.findById(request.getProductId())
+                    .orElseThrow(() -> new AppException("Product not found", HttpStatus.NOT_FOUND));
+            post.setProduct(product);
+        } else {
+            post.setProduct(null);
+        }
+
         post.setUpdatedAt(LocalDateTime.now());
-        
-        Post updatedPost = postRepository.save(post);
-        
-        return mapToPostResponse(updatedPost, currentUser);
+        Post saved = postRepository.save(post);
+
+        return mapToResponse(saved, currentUser);
     }
 
-    /**
-     * Delete a post
-     * @param postId the post ID
-     */
+    // ----------------- DELETE POST -----------------
     @Transactional
-    public void deletePost(Long postId) {
-        User currentUser = userService.getCurrentUser();
-        
+    public void deletePost(Long postId, Long userId) {
         Post post = postRepository.findById(postId)
                 .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
-        
-        // Only the post owner can delete it
-        if (!post.getUser().getId().equals(currentUser.getId())) {
-            throw new AppException("You can only delete your own posts", HttpStatus.FORBIDDEN);
+
+        if (!post.getUser().getId().equals(userId)) {
+            throw new AppException("You are not authorized to delete this post", HttpStatus.FORBIDDEN);
         }
-        
+
+        likeRepository.deleteAllByLikeableTypeAndLikeableId(LikeableType.POST, postId);
         postRepository.delete(post);
     }
 
-    /**
-     * Like a post
-     * @param postId the post ID
-     * @return the updated post response
-     */
-    @Transactional
-    public PostResponse likePost(Long postId) {
-        User currentUser = userService.getCurrentUser();
-        
-        Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
-        
-        // Check if the user has already liked the post
-        if (post.isLikedBy(currentUser)) {
-            throw new AppException("You have already liked this post", HttpStatus.BAD_REQUEST);
-        }
-        
-        // Add the like
-        post.addLike(currentUser);
-        Post updatedPost = postRepository.save(post);
-        
-        return mapToPostResponse(updatedPost, currentUser);
-    }
+    // ----------------- MAPPERS -----------------
+    private PostResponse mapToResponse(Post post, User currentUser) {
+        long likesCount = likeRepository.countByLikeableTypeAndLikeableId(LikeableType.POST, post.getId());
+        // Count all comments on the post (including replies)
+        long commentsCount = commentRepository.countByPost(post);
+        long repostsCount = Math.max(
+                postRepostRepository.countByPost(post),
+                post.getRepostedBy() != null ? post.getRepostedBy().size() : 0
+        );
+        long savesCount = Math.max(
+                postSaveRepository.countByPost(post),
+                post.getSavedBy() != null ? post.getSavedBy().size() : 0
+        );
+        long sharesCount = post.getSharedBy() != null ? post.getSharedBy().size() : 0;
 
-    /**
-     * Unlike a post
-     * @param postId the post ID
-     * @return the updated post response
-     */
-    @Transactional
-    public PostResponse unlikePost(Long postId) {
-        User currentUser = userService.getCurrentUser();
-        
-        Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
-        
-        // Check if the user has liked the post
-        if (!post.isLikedBy(currentUser)) {
-            throw new AppException("You have not liked this post", HttpStatus.BAD_REQUEST);
-        }
-        
-        // Remove the like
-        post.removeLike(currentUser);
-        Post updatedPost = postRepository.save(post);
-        
-        return mapToPostResponse(updatedPost, currentUser);
-    }
+        boolean isLiked = currentUser != null && likeRepository.existsByUserAndLikeableTypeAndLikeableId(currentUser, LikeableType.POST, post.getId());
+        boolean isReposted = currentUser != null && (
+                postRepostRepository.existsByUserIdAndPostId(currentUser.getId(), post.getId())
+                || (post.getRepostedBy() != null && post.getRepostedBy().contains(currentUser))
+        );
+        boolean isSaved = currentUser != null && (
+                postSaveRepository.existsByUserIdAndPostId(currentUser.getId(), post.getId())
+                || (post.getSavedBy() != null && post.getSavedBy().contains(currentUser))
+        );
+        boolean userVerified = post.getUser().getRole() == Role.ARTIST || post.getUser().getRole() == Role.ADMIN;
 
-    /**
-     * Map a Post entity to a PostResponse DTO
-     * @param post the post entity
-     * @param currentUser the current user
-     * @return the post response DTO
-     */
-    private PostResponse mapToPostResponse(Post post, User currentUser) {
+        String username = post.getUser().getUsername();
+        if (username == null || username.trim().isEmpty()) {
+            username = post.getUser().getFullName() != null
+                    ? post.getUser().getFullName().toLowerCase().replaceAll("\\s+", "")
+                    : "artist";
+        }
+
+        List<Like> recentLikes = null;
+        try {
+            recentLikes = likeRepository.findRecentLikesByPost(post.getId(), org.springframework.data.domain.PageRequest.of(0, 3));
+        } catch (Exception e) {
+            log.warn("Could not load recent likes for post {}: {}", post.getId(), e.getMessage());
+        }
+
+        List<UserPublicDTO> recentLikers = (recentLikes != null) ? recentLikes.stream()
+                .map(Like::getUser)
+                .filter(java.util.Objects::nonNull)
+                .map(u -> UserPublicDTO.builder()
+                        .id(u.getId())
+                        .fullName(u.getFullName())
+                        .username(u.getUsername())
+                        .profilePicture(u.getProfilePicture())
+                        .build())
+                .toList() : new ArrayList<>();
+
         return PostResponse.builder()
                 .id(post.getId())
                 .userId(post.getUser().getId())
                 .userName(post.getUser().getFullName())
-                .userImageUrl(null) // TODO: Add user image URL when available
-                .product(null) // TODO: Add product response when available
+                .userUsername(username)
+                .userImageUrl(post.getUser().getProfilePicture())
+                .userRole(post.getUser().getRole() != null ? post.getUser().getRole().name() : "USER")
+                .userVerified(userVerified)
                 .videoUrl(post.getVideoUrl())
-                .photoUrls(post.getPhotoUrls())
+                .imageUrls(post.getImageUrls() != null ? post.getImageUrls() : new ArrayList<>())
                 .description(post.getDescription())
+                .likesCount(likesCount)
+                .commentsCount(commentsCount)
+                .sharesCount(sharesCount)
+                .repostsCount(repostsCount)
+                .savesCount(savesCount)
+                .isLiked(isLiked)
+                .isShared(false)
+                .isReposted(isReposted)
+                .isSaved(isSaved)
                 .createdAt(post.getCreatedAt())
                 .updatedAt(post.getUpdatedAt())
-                .likesCount(post.getLikesCount())
-                .commentsCount(post.getCommentsCount())
-                .sharesCount(post.getSharesCount())
-                .isLiked(post.isLikedBy(currentUser))
-                .isShared(false) // TODO: Implement check if user has shared the post
-                .comments(null) // Comments are loaded separately
+                .product(post.getProduct() != null ? mapToProductResponse(post.getProduct()) : null)
+                .isSponsored(post.isSponsored())
+                .sponsorName(post.getSponsorName())
+                .attachedType(post.getAttachedType())
+                .attachedTitle(post.getAttachedTitle())
+                .attachedSubtitle(post.getAttachedSubtitle())
+                .attachedPrice(post.getAttachedPrice())
+                .recentLikers(recentLikers)
+                .build();
+    }
+
+    private Instant toInstant(LocalDateTime ldt) {
+        if (ldt == null) return null;
+        return ldt.atZone(ZoneId.systemDefault()).toInstant();
+    }
+
+    private CommentResponse mapToCommentResponse(Comment comment, User currentUser) {
+        if (comment == null) return null;
+
+        List<CommentResponse> replies = new ArrayList<>();
+        int repliesCount = 0;
+        try {
+            List<Comment> replyList = commentRepository.findByParentOrderByCreatedAtAsc(comment);
+            if (replyList != null) {
+                repliesCount = replyList.size();
+                replies = replyList.stream()
+                        .limit(3)
+                        .map(r -> mapToCommentResponseSimple(r, currentUser))
+                        .toList();
+            }
+        } catch (Exception e) {
+            log.warn("Could not load replies for comment {}: {}", comment.getId(), e.getMessage());
+        }
+
+        int likesCount = 0;
+        boolean isLiked = false;
+        try {
+            if (comment.getLikedBy() != null) {
+                likesCount = comment.getLikedBy().size();
+                if (currentUser != null) {
+                    isLiked = comment.isLikedBy(currentUser);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Could not load likes for comment {}: {}", comment.getId(), e.getMessage());
+        }
+
+        Long parentId = comment.getParent() != null ? comment.getParent().getId() : null;
+        Long parentUserId = comment.getParent() != null && comment.getParent().getUser() != null ? comment.getParent().getUser().getId() : null;
+        String parentUserName = comment.getParent() != null && comment.getParent().getUser() != null
+                ? (comment.getParent().getUser().getUsername() != null ? comment.getParent().getUser().getUsername() : comment.getParent().getUser().getFullName())
+                : null;
+        boolean isReply = comment.isReply();
+        boolean isSelfReply = isReply && comment.getUser() != null && parentUserId != null && comment.getUser().getId().equals(parentUserId);
+
+        return CommentResponse.builder()
+                .id(comment.getId())
+                .postId(comment.getPost() != null ? comment.getPost().getId() : null)
+                .userId(comment.getUser() != null ? comment.getUser().getId() : null)
+                .userName(comment.getUser() != null ? comment.getUser().getFullName() : "Anonymous")
+                .userUsername(comment.getUser() != null ? comment.getUser().getUsername() : null)
+                .userImageUrl(comment.getUser() != null ? comment.getUser().getProfilePicture() : null)
+                .content(comment.getContent())
+                .createdAt(toInstant(comment.getCreatedAt()))
+                .updatedAt(toInstant(comment.getUpdatedAt()))
+                .parentId(parentId)
+                .parentUserId(parentUserId)
+                .parentUserName(parentUserName)
+                .isReply(isReply)
+                .isSelfReply(isSelfReply)
+                .likesCount(likesCount)
+                .repliesCount(repliesCount)
+                .isLiked(isLiked)
+                .replies(replies)
+                .build();
+    }
+
+    private CommentResponse mapToCommentResponseSimple(Comment comment, User currentUser) {
+        if (comment == null) return null;
+
+        int likesCount = 0;
+        boolean isLiked = false;
+        try {
+            if (comment.getLikedBy() != null) {
+                likesCount = comment.getLikedBy().size();
+                if (currentUser != null) {
+                    isLiked = comment.isLikedBy(currentUser);
+                }
+            }
+        } catch (Exception e) {
+            // ignore
+        }
+
+        Long parentId = comment.getParent() != null ? comment.getParent().getId() : null;
+        Long parentUserId = comment.getParent() != null && comment.getParent().getUser() != null ? comment.getParent().getUser().getId() : null;
+        String parentUserName = comment.getParent() != null && comment.getParent().getUser() != null
+                ? (comment.getParent().getUser().getUsername() != null ? comment.getParent().getUser().getUsername() : comment.getParent().getUser().getFullName())
+                : null;
+        boolean isReply = comment.isReply();
+        boolean isSelfReply = isReply && comment.getUser() != null && parentUserId != null && comment.getUser().getId().equals(parentUserId);
+
+        return CommentResponse.builder()
+                .id(comment.getId())
+                .postId(comment.getPost() != null ? comment.getPost().getId() : null)
+                .userId(comment.getUser() != null ? comment.getUser().getId() : null)
+                .userName(comment.getUser() != null ? comment.getUser().getFullName() : "Anonymous")
+                .userUsername(comment.getUser() != null ? comment.getUser().getUsername() : null)
+                .userImageUrl(comment.getUser() != null ? comment.getUser().getProfilePicture() : null)
+                .content(comment.getContent())
+                .createdAt(toInstant(comment.getCreatedAt()))
+                .updatedAt(toInstant(comment.getUpdatedAt()))
+                .parentId(parentId)
+                .parentUserId(parentUserId)
+                .parentUserName(parentUserName)
+                .isReply(isReply)
+                .isSelfReply(isSelfReply)
+                .likesCount(likesCount)
+                .repliesCount(0)
+                .isLiked(isLiked)
+                .replies(new ArrayList<>())
+                .build();
+    }
+
+    @Transactional(readOnly = true)
+    public List<UserPublicDTO> getPostLikes(Long postId) {
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
+
+        List<User> likers = new ArrayList<>();
+        if (post.getLikedBy() != null && !post.getLikedBy().isEmpty()) {
+            likers.addAll(post.getLikedBy());
+        } else {
+            List<Like> likes = likeRepository.findAllByLikeableTypeAndLikeableId(LikeableType.POST, postId);
+            for (Like l : likes) {
+                if (l.getUser() != null && !likers.contains(l.getUser())) {
+                    likers.add(l.getUser());
+                }
+            }
+        }
+
+        return likers.stream()
+                .map(user -> UserPublicDTO.builder()
+                        .id(user.getId())
+                        .fullName(user.getFullName())
+                        .username(user.getUsername())
+                        .email(user.getEmail())
+                        .phoneNumber(user.getPhoneNumber())
+                        .bio(user.getBio())
+                        .profilePicture(user.getProfilePicture())
+                        .role(user.getRole() != null ? user.getRole().name() : "USER")
+                        .status(user.getStatus() != null ? user.getStatus().name() : "ACTIVE")
+                        .accountVerified(user.isAccountVerified())
+                        .fandomName(user.getFandomName())
+                        .followersCount(followerRepository.countByFollowing(user))
+                        .followingCount(followerRepository.countByFollower(user))
+                        .createdAt(user.getAccountVerifiedAt() != null ? user.getAccountVerifiedAt() : java.time.LocalDateTime.of(2026, 1, 1, 0, 0))
+                        .build())
+                .toList();
+    }
+
+    private ProductResponse mapToProductResponse(Product product) {
+        return ProductResponse.builder()
+                .id(product.getId())
+                .name(product.getName())
+                .description(product.getDescription())
+                .price(product.getPrice())
+                .imageUrls(product.getImageUrls())
+                .status(product.getStatus())
+                .productType(product.getProductType())
                 .build();
     }
 }

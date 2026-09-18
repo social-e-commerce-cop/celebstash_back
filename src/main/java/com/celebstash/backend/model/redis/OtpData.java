@@ -33,6 +33,7 @@ public class OtpData implements Serializable {
 
     // User information for signup
     private String fullName;
+    private String username;
     private String password;
 
     @TimeToLive

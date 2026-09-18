@@ -35,7 +35,14 @@ public class AuthenticationService {
         // Validate password match
         if (!Objects.equals(request.getPassword(), request.getConfirmPassword())) {
             log.warn("Password mismatch during signup for identifier: {}", request.getIdentifier());
-            return false;
+            throw new IllegalArgumentException("Passwords do not match.");
+        }
+
+        if (request.getUsername() != null && !request.getUsername().isBlank()) {
+            if (userService.existsByUsername(request.getUsername().trim())) {
+                log.warn("Username already exists: {}", request.getUsername());
+                throw new IllegalArgumentException("Username is already taken.");
+            }
         }
 
         boolean isEmail = isEmail(request.getIdentifier());
@@ -43,10 +50,10 @@ public class AuthenticationService {
         // Check if user already exists
         if (isEmail && userService.existsByEmail(request.getIdentifier())) {
             log.warn("Email already exists: {}", request.getIdentifier());
-            return false;
+            throw new IllegalArgumentException("Email is already registered.");
         } else if (!isEmail && userService.existsByPhoneNumber(request.getIdentifier())) {
             log.warn("Phone number already exists: {}", request.getIdentifier());
-            return false;
+            throw new IllegalArgumentException("Phone number is already registered.");
         }
 
         // Send OTP with user information
@@ -55,6 +62,7 @@ public class AuthenticationService {
             OtpData.OtpType.SIGNUP, 
             httpRequest,
             request.getFullName(),
+            request.getUsername(),
             request.getPassword()
         );
     }
@@ -74,6 +82,7 @@ public class AuthenticationService {
         // Get user information from OTP data
         OtpData otpData = otpDataOpt.get();
         String fullName = otpData.getFullName();
+        String username = otpData.getUsername();
         String password = otpData.getPassword();
 
         if (fullName == null || password == null) {
@@ -90,6 +99,7 @@ public class AuthenticationService {
         // Create user
         User user = userService.createUser(
                 fullName,
+                username,
                 request.getIdentifier(),
                 password,
                 isEmail
@@ -186,9 +196,8 @@ public class AuthenticationService {
         // Check if user exists
         Optional<User> userOpt = userService.findByEmailOrPhoneNumber(identifier);
         if (userOpt.isEmpty()) {
-            // For security, don't reveal if user exists
-            log.info("Password reset requested for non-existent user: {}", identifier);
-            return true;
+            log.warn("Password reset requested for non-existent user: {}", identifier);
+            throw new IllegalArgumentException("No account found with this email or phone number.");
         }
 
         // Send OTP
@@ -205,20 +214,20 @@ public class AuthenticationService {
         // Validate password match
         if (!Objects.equals(request.getNewPassword(), request.getConfirmPassword())) {
             log.warn("Password mismatch during reset for identifier: {}", request.getIdentifier());
-            return false;
+            throw new IllegalArgumentException("Passwords do not match.");
         }
 
         // Verify OTP
         if (!otpService.verifyOtp(request.getIdentifier(), request.getOtp(), OtpData.OtpType.PASSWORD_RESET)) {
             log.warn("Invalid OTP during password reset for identifier: {}", request.getIdentifier());
-            return false;
+            throw new IllegalArgumentException("Invalid or expired reset code.");
         }
 
         // Find user
         Optional<User> userOpt = userService.findByEmailOrPhoneNumber(request.getIdentifier());
         if (userOpt.isEmpty()) {
             log.warn("User not found during password reset: {}", request.getIdentifier());
-            return false;
+            throw new IllegalArgumentException("No user found with this email or phone number.");
         }
 
         User user = userOpt.get();
@@ -240,6 +249,8 @@ public class AuthenticationService {
                 .expiresIn(jwtUtils.extractExpiration(accessToken).getTime() - System.currentTimeMillis())
                 .userId(user.getId().toString())
                 .fullName(user.getFullName())
+                .username(user.getUsername())
+                .role(user.getRole() != null ? user.getRole().name() : "USER")
                 .email(user.getEmail())
                 .phoneNumber(user.getPhoneNumber())
                 .status(user.getStatus())

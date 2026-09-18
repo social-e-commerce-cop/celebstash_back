@@ -33,13 +33,15 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
+    private final PasswordEncoder passwordEncoder;
 
     @Lazy
     @Autowired
     private UserDetailsService userDetailsService;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtAuthFilter) {
+    public SecurityConfig(JwtAuthenticationFilter jwtAuthFilter, PasswordEncoder passwordEncoder) {
         this.jwtAuthFilter = jwtAuthFilter;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @Bean
@@ -50,9 +52,26 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(
                     "/api/v1/auth/**",
+                    "/api/files/**",
                     "/api-docs/**",
                     "/swagger-ui/**",
-                    "/swagger-ui.html"
+                    "/swagger-ui.html",
+                    "/ws/**"           // WebSocket SockJS handshake
+                ).permitAll()
+                .requestMatchers(org.springframework.http.HttpMethod.GET, 
+                    "/api/files/**",
+                    "/api/posts",
+                    "/api/posts/feed",
+                    "/api/posts/discovery",
+                    "/api/posts/user/**",
+                    "/api/posts/*",
+                    "/api/posts/*/comments",
+                    "/api/posts/*/comments/**",
+                    "/api/follow/users/**",
+                    "/api/music/releases",
+                    "/api/music/releases/**",
+                    "/api/music/tracks/*/stream",
+                    "/api/music/tracks/*/access"
                 ).permitAll()
                 .anyRequest().authenticated()
             )
@@ -63,16 +82,12 @@ public class SecurityConfig {
         return http.build();
     }
 
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder(12);
-    }
 
     @Bean
     public AuthenticationProvider authenticationProvider() {
         DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
         authProvider.setUserDetailsService(userDetailsService);
-        authProvider.setPasswordEncoder(passwordEncoder());
+        authProvider.setPasswordEncoder(passwordEncoder);
         return authProvider;
     }
 
@@ -84,13 +99,7 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of(
-            "http://localhost:3000", 
-            "https://yourdomain.com",
-            "exp://localhost:8081",
-            "exp://192.168.1.100:8081",
-            "exp://10.0.2.2:8081"
-        ));
+        configuration.setAllowedOriginPatterns(List.of("*"));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-Requested-With", "Accept"));
         configuration.setExposedHeaders(List.of("Authorization"));

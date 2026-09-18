@@ -1,16 +1,16 @@
 package com.celebstash.backend.model;
 
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 
 import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.Set;
 
-@Data
+@Getter
+@Setter
+@ToString(exclude = {"parent", "replies", "likedBy", "post", "user"})
+@EqualsAndHashCode(onlyExplicitlyIncluded = true)
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
@@ -20,6 +20,7 @@ public class Comment {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @EqualsAndHashCode.Include
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -38,6 +39,7 @@ public class Comment {
 
     private LocalDateTime updatedAt;
 
+    @Builder.Default
     @ManyToMany
     @JoinTable(
         name = "comment_likes",
@@ -50,12 +52,19 @@ public class Comment {
     @JoinColumn(name = "parent_id")
     private Comment parent;
 
+    @Builder.Default
     @OneToMany(mappedBy = "parent", cascade = CascadeType.ALL, orphanRemoval = true)
     private Set<Comment> replies = new HashSet<>();
 
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
+        if (likedBy == null) {
+            likedBy = new HashSet<>();
+        }
+        if (replies == null) {
+            replies = new HashSet<>();
+        }
     }
 
     @PreUpdate
@@ -64,23 +73,33 @@ public class Comment {
     }
 
     public int getLikesCount() {
-        return likedBy.size();
+        return likedBy == null ? 0 : likedBy.size();
     }
 
     public int getRepliesCount() {
-        return replies.size();
+        return replies == null ? 0 : replies.size();
     }
 
     public boolean isLikedBy(User user) {
-        return likedBy.contains(user);
+        if (likedBy == null || user == null || user.getId() == null) {
+            return false;
+        }
+        return likedBy.stream().anyMatch(u -> u.getId() != null && u.getId().equals(user.getId()));
     }
 
     public void addLike(User user) {
-        likedBy.add(user);
+        if (likedBy == null) {
+            likedBy = new HashSet<>();
+        }
+        if (!isLikedBy(user)) {
+            likedBy.add(user);
+        }
     }
 
     public void removeLike(User user) {
-        likedBy.remove(user);
+        if (likedBy != null && user != null && user.getId() != null) {
+            likedBy.removeIf(u -> u.getId() != null && u.getId().equals(user.getId()));
+        }
     }
 
     public boolean isReply() {

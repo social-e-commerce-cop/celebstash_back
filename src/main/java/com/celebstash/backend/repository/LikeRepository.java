@@ -3,38 +3,35 @@ package com.celebstash.backend.repository;
 import com.celebstash.backend.model.Like;
 import com.celebstash.backend.model.User;
 import com.celebstash.backend.model.enums.LikeableType;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
 
-@Repository
 public interface LikeRepository extends JpaRepository<Like, Long> {
 
-    // Find all likes by user
-    List<Like> findByUser(User user);
-    
-    // Find all likes by user with pagination
-    Page<Like> findByUser(User user, Pageable pageable);
-    
-    // Find all likes by likeable type and ID
-    List<Like> findByLikeableTypeAndLikeableId(LikeableType likeableType, Long likeableId);
-    
-    // Find all likes by likeable type and ID with pagination
-    Page<Like> findByLikeableTypeAndLikeableId(LikeableType likeableType, Long likeableId, Pageable pageable);
-    
-    // Find a specific like by user, likeable type, and likeable ID
-    Optional<Like> findByUserAndLikeableTypeAndLikeableId(User user, LikeableType likeableType, Long likeableId);
-    
-    // Check if a user has liked a specific entity
     boolean existsByUserAndLikeableTypeAndLikeableId(User user, LikeableType likeableType, Long likeableId);
-    
-    // Count likes by likeable type and ID
+
+    @Query("SELECT COUNT(l) > 0 FROM Like l WHERE l.user.id = :userId AND l.likeableType = :likeableType AND l.likeableId = :likeableId")
+    boolean existsByUserIdAndLikeableTypeAndLikeableId(@Param("userId") Long userId, @Param("likeableType") LikeableType likeableType, @Param("likeableId") Long likeableId);
+
     long countByLikeableTypeAndLikeableId(LikeableType likeableType, Long likeableId);
-    
-    // Delete a like by user, likeable type, and likeable ID
+
+    Optional<Like> findByUserAndLikeableTypeAndLikeableId(User user, LikeableType likeableType, Long likeableId);
+
+    List<Like> findAllByLikeableTypeAndLikeableId(LikeableType likeableType, Long likeableId);
+
+    @Query("SELECT l FROM Like l JOIN FETCH l.user WHERE l.likeableType = com.celebstash.backend.model.enums.LikeableType.POST AND l.likeableId = :postId ORDER BY l.createdAt DESC")
+    List<Like> findRecentLikesByPost(@Param("postId") Long postId, org.springframework.data.domain.Pageable pageable);
+
+    void deleteAllByLikeableTypeAndLikeableId(LikeableType likeableType, Long likeableId);
+
     void deleteByUserAndLikeableTypeAndLikeableId(User user, LikeableType likeableType, Long likeableId);
+
+    @Modifying
+    @Query("DELETE FROM Like l WHERE l.user.id = :userId AND l.likeableType = :likeableType AND l.likeableId = :likeableId")
+    void deleteByUserIdAndLikeableTypeAndLikeableId(@Param("userId") Long userId, @Param("likeableType") LikeableType likeableType, @Param("likeableId") Long likeableId);
 }

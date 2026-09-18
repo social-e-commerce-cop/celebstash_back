@@ -1,5 +1,6 @@
 package com.celebstash.backend.service;
 
+import com.celebstash.backend.dto.wallet.MomoTopUpRequest;
 import com.celebstash.backend.dto.wallet.TopUpRequest;
 import com.celebstash.backend.dto.wallet.TransactionResponse;
 import com.celebstash.backend.dto.wallet.WalletResponse;
@@ -33,11 +34,9 @@ public class WalletService {
     private final TransactionRepository transactionRepository;
     private final ProductRepository productRepository;
     private final UserService userService;
+    private final MomoGatewayService momoGatewayService;
 
-    /**
-     * Get or create a wallet for the current user
-     * @return the user's wallet
-     */
+    /** Get or create wallet for current user */
     @Transactional
     public Wallet getOrCreateWallet() {
         User currentUser = userService.getCurrentUser();
@@ -52,26 +51,18 @@ public class WalletService {
                 });
     }
 
-    /**
-     * Get the current user's wallet information
-     * @return wallet response with balance
-     */
+    /** Get wallet info */
     @Transactional(readOnly = true)
     public WalletResponse getWalletInfo() {
-        Wallet wallet = getOrCreateWallet();
-        return mapToWalletResponse(wallet);
+        return mapToWalletResponse(getOrCreateWallet());
     }
 
-    /**
-     * Add funds to the user's wallet
-     * @param request the top-up request
-     * @return the updated wallet response
-     */
+    /** Top up wallet */
     @Transactional
     public WalletResponse topUpWallet(TopUpRequest request) {
         Wallet wallet = getOrCreateWallet();
-        
-        // Create a deposit transaction
+        wallet.setBalance(wallet.getBalance().add(request.getAmount()));
+
         Transaction transaction = Transaction.builder()
                 .wallet(wallet)
                 .amount(request.getAmount())
@@ -81,89 +72,64 @@ public class WalletService {
                 .createdAt(LocalDateTime.now())
                 .completedAt(LocalDateTime.now())
                 .build();
-        
-        // Update wallet balance
-        wallet.setBalance(wallet.getBalance().add(request.getAmount()));
-        
-        // Save transaction and wallet
+
         transactionRepository.save(transaction);
         walletRepository.save(wallet);
-        
         return mapToWalletResponse(wallet);
     }
 
-    /**
-     * Check if the user has sufficient balance for a purchase
-     * @param amount the amount to check
-     * @return true if the user has sufficient balance
-     */
-    @Transactional(readOnly = true)
-    public boolean hasSufficientBalance(BigDecimal amount) {
-        Wallet wallet = getOrCreateWallet();
-        return wallet.getBalance().compareTo(amount) >= 0;
-    }
-
-    /**
-     * Deduct funds from the user's wallet for a purchase
-     * @param amount the amount to deduct
-     * @param productId the ID of the product being purchased
-     * @return the updated wallet response
-     */
+    /** Top up wallet with Mobile Money */
     @Transactional
-    public WalletResponse deductFunds(BigDecimal amount, Long productId) {
+    public WalletResponse topUpWithMomo(MomoTopUpRequest request) {
         Wallet wallet = getOrCreateWallet();
-        
-        // Check if user has sufficient balance
-        if (wallet.getBalance().compareTo(amount) < 0) {
-            throw new AppException("Insufficient balance", HttpStatus.BAD_REQUEST);
+
+        // Call Momo Gateway Mock
+        MomoGatewayService.MomoTransactionResponse momoRes = momoGatewayService.initiatePayment(
+                request.getPhoneNumber(), request.getAmount(), request.getProvider()
+        );
+
+        if (!"SUCCESS".equals(momoRes.getStatus())) {
+            throw new AppException("Mobile Money transaction failed: " + momoRes.getMessage(), HttpStatus.BAD_REQUEST);
         }
-        
-        // Get the product
-        Product product = productRepository.findById(productId)
-                .orElseThrow(() -> new AppException("Product not found", HttpStatus.NOT_FOUND));
-        
-        // Create a purchase transaction
+
+        wallet.setBalance(wallet.getBalance().add(request.getAmount()));
+        wallet.setUpdatedAt(LocalDateTime.now());
+        walletRepository.save(wallet);
+
         Transaction transaction = Transaction.builder()
                 .wallet(wallet)
-                .amount(amount)
-                .type(TransactionType.PURCHASE)
+                .amount(request.getAmount())
+                .type(TransactionType.DEPOSIT)
                 .status(TransactionStatus.COMPLETED)
-                .description("Purchase of " + product.getName())
-                .product(product)
+                .description("Mobile Money Deposit (" + request.getProvider() + ") ref: " + momoRes.getTransactionId())
                 .createdAt(LocalDateTime.now())
                 .completedAt(LocalDateTime.now())
                 .build();
-        
-        // Update wallet balance
-        wallet.setBalance(wallet.getBalance().subtract(amount));
-        
-        // Save transaction and wallet
+
         transactionRepository.save(transaction);
-        walletRepository.save(wallet);
-        
         return mapToWalletResponse(wallet);
     }
 
-    /**
-     * Reserve funds for a bid (create a pending transaction)
-     * @param amount the bid amount
-     * @param productId the ID of the product being bid on
-     * @return the transaction response
-     */
+    /** Check if wallet has sufficient balance */
+    @Transactional(readOnly = true)
+    public boolean hasSufficientBalance(BigDecimal amount) {
+        return getOrCreateWallet().getBalance().compareTo(amount) >= 0;
+    }
+
+    /** Reserve funds for a bid */
     @Transactional
     public TransactionResponse reserveFundsForBid(BigDecimal amount, Long productId) {
         Wallet wallet = getOrCreateWallet();
-        
-        // Check if user has sufficient balance
         if (wallet.getBalance().compareTo(amount) < 0) {
-            throw new AppException("Insufficient balance", HttpStatus.BAD_REQUEST);
+            throw new AppException("Insufficient balance for bidding", HttpStatus.BAD_REQUEST);
         }
-        
-        // Get the product
+
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new AppException("Product not found", HttpStatus.NOT_FOUND));
-        
-        // Create a bid transaction
+
+        wallet.setBalance(wallet.getBalance().subtract(amount));
+        wallet.setHeldBalance(wallet.getHeldBalance().add(amount));
+
         Transaction transaction = Transaction.builder()
                 .wallet(wallet)
                 .amount(amount)
@@ -173,114 +139,229 @@ public class WalletService {
                 .product(product)
                 .createdAt(LocalDateTime.now())
                 .build();
-        
-        // Update wallet balance
-        wallet.setBalance(wallet.getBalance().subtract(amount));
-        
-        // Save transaction and wallet
-        Transaction savedTransaction = transactionRepository.save(transaction);
+
+        transactionRepository.save(transaction);
         walletRepository.save(wallet);
-        
-        return mapToTransactionResponse(savedTransaction);
+
+        return mapToTransactionResponse(transaction);
     }
 
-    /**
-     * Refund a bid amount to the user's wallet
-     * @param transactionId the ID of the transaction to refund
-     * @return the updated wallet response
-     */
+    /** Refund a bid by transaction ID (used by BidScheduler) */
     @Transactional
     public WalletResponse refundBid(Long transactionId) {
         Transaction transaction = transactionRepository.findById(transactionId)
                 .orElseThrow(() -> new AppException("Transaction not found", HttpStatus.NOT_FOUND));
-        
-        // Verify this is a bid transaction
-        if (transaction.getType() != TransactionType.BID) {
-            throw new AppException("Not a bid transaction", HttpStatus.BAD_REQUEST);
+
+        if (transaction.getType() != TransactionType.BID || transaction.getStatus() != TransactionStatus.PENDING) {
+            throw new AppException("Transaction is not a pending bid", HttpStatus.BAD_REQUEST);
         }
-        
-        // Update transaction status
+
+        // Mark original transaction as refunded
         transaction.setStatus(TransactionStatus.REFUNDED);
         transaction.setCompletedAt(LocalDateTime.now());
-        
-        // Create a refund transaction
+        transactionRepository.save(transaction);
+
+        // Refund wallet
+        Wallet wallet = transaction.getWallet();
+        wallet.setBalance(wallet.getBalance().add(transaction.getAmount()));
+        wallet.setHeldBalance(wallet.getHeldBalance().subtract(transaction.getAmount()));
+        wallet.setUpdatedAt(LocalDateTime.now());
+        walletRepository.save(wallet);
+
+        // Record refund transaction
         Transaction refundTransaction = Transaction.builder()
-                .wallet(transaction.getWallet())
+                .wallet(wallet)
                 .amount(transaction.getAmount())
                 .type(TransactionType.BID_REFUND)
                 .status(TransactionStatus.COMPLETED)
-                .description("Refund for bid on " + 
+                .description("Refund for outbid bid on " +
                         (transaction.getProduct() != null ? transaction.getProduct().getName() : "product"))
                 .product(transaction.getProduct())
                 .createdAt(LocalDateTime.now())
                 .completedAt(LocalDateTime.now())
                 .build();
-        
-        // Update wallet balance
-        Wallet wallet = transaction.getWallet();
-        wallet.setBalance(wallet.getBalance().add(transaction.getAmount()));
-        
-        // Save transactions and wallet
-        transactionRepository.save(transaction);
         transactionRepository.save(refundTransaction);
-        walletRepository.save(wallet);
-        
+
         return mapToWalletResponse(wallet);
     }
 
+    @Transactional
+    public WalletResponse deductFunds(BigDecimal amount, String description, String pin) {
+        Wallet wallet = getOrCreateWallet();
+
+        // Check if PIN matches
+        if (!hasPinSet() || !wallet.getPin().equals(pin)) {
+            throw new AppException("Invalid PIN", HttpStatus.BAD_REQUEST);
+        }
+
+        // Check balance
+        if (wallet.getBalance().compareTo(amount) < 0) {
+            throw new AppException("Insufficient balance", HttpStatus.BAD_REQUEST);
+        }
+
+        // Deduct funds
+        wallet.setBalance(wallet.getBalance().subtract(amount));
+        wallet.setUpdatedAt(LocalDateTime.now());
+
+        // Create transaction
+        Transaction transaction = Transaction.builder()
+                .wallet(wallet)
+                .amount(amount)
+                .type(TransactionType.PAYMENT)
+                .status(TransactionStatus.COMPLETED)
+                .description(description != null ? description : "Payment")
+                .createdAt(LocalDateTime.now())
+                .completedAt(LocalDateTime.now())
+                .build();
+
+        transactionRepository.save(transaction);
+        walletRepository.save(wallet);
+
+        return mapToWalletResponse(wallet);
+    }
+
+
     /**
-     * Get transaction history for the current user
-     * @return list of transaction responses
+     * Refund a previous bidder's reserved bid amount
+     * @param userId the ID of the user to refund
+     * @param amount the bid amount to refund
+     * @return updated wallet response
      */
+    @Transactional
+    public WalletResponse refundReservedFunds(Long userId, BigDecimal amount) {
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new AppException("Wallet not found for user " + userId, HttpStatus.NOT_FOUND));
+
+        wallet.setBalance(wallet.getBalance().add(amount));
+        wallet.setHeldBalance(wallet.getHeldBalance().subtract(amount));
+        wallet.setUpdatedAt(LocalDateTime.now());
+
+        Transaction refundTransaction = Transaction.builder()
+                .wallet(wallet)
+                .amount(amount)
+                .type(TransactionType.BID_REFUND)
+                .status(TransactionStatus.COMPLETED)
+                .description("Refund for outbid amount")
+                .createdAt(LocalDateTime.now())
+                .completedAt(LocalDateTime.now())
+                .build();
+
+        transactionRepository.save(refundTransaction);
+        walletRepository.save(wallet);
+
+        return mapToWalletResponse(wallet);
+    }
+
+    @Transactional
+    public void completeBidPayout(Long winnerUserId, Long sellerUserId, BigDecimal amount, Long productId) {
+        Wallet winnerWallet = walletRepository.findByUserId(winnerUserId)
+                .orElseThrow(() -> new AppException("Winner wallet not found", HttpStatus.NOT_FOUND));
+        
+        // Deduct winner's held balance
+        winnerWallet.setHeldBalance(winnerWallet.getHeldBalance().subtract(amount));
+        walletRepository.save(winnerWallet);
+
+        // Find the product
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new AppException("Product not found", HttpStatus.NOT_FOUND));
+
+        // Credit creator wallet minus 5% platform commission
+        BigDecimal platformCommission = amount.multiply(new BigDecimal("0.05"));
+        BigDecimal sellerPayout = amount.subtract(platformCommission);
+
+        Wallet sellerWallet = walletRepository.findByUserId(sellerUserId)
+                .orElseGet(() -> {
+                    User seller = product.getSeller();
+                    Wallet newWallet = Wallet.builder()
+                            .user(seller)
+                            .balance(BigDecimal.ZERO)
+                            .createdAt(LocalDateTime.now())
+                            .build();
+                    return walletRepository.save(newWallet);
+                });
+
+        sellerWallet.setBalance(sellerWallet.getBalance().add(sellerPayout));
+        walletRepository.save(sellerWallet);
+
+        // Create deposit transaction for seller
+        Transaction sellerTx = Transaction.builder()
+                .wallet(sellerWallet)
+                .amount(sellerPayout)
+                .type(TransactionType.DEPOSIT)
+                .status(TransactionStatus.COMPLETED)
+                .description("Payout for won auction: " + product.getName() + " (minus 5% platform fee)")
+                .product(product)
+                .createdAt(LocalDateTime.now())
+                .completedAt(LocalDateTime.now())
+                .build();
+        transactionRepository.save(sellerTx);
+    }
+
+
+    /** Get transaction history */
     @Transactional(readOnly = true)
     public List<TransactionResponse> getTransactionHistory() {
         Wallet wallet = getOrCreateWallet();
         List<Transaction> transactions = transactionRepository.findByWalletOrderByCreatedAtDesc(wallet);
-        
         return transactions.stream()
                 .map(this::mapToTransactionResponse)
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Map a Wallet entity to a WalletResponse DTO
-     * @param wallet the wallet entity
-     * @return the wallet response DTO
-     */
+    /** Set or update wallet PIN */
+    @Transactional
+    public WalletResponse setPin(String pin) {
+        validatePin(pin);
+        Wallet wallet = getOrCreateWallet();
+        wallet.setPin(pin);
+        wallet.setUpdatedAt(LocalDateTime.now());
+        walletRepository.save(wallet);
+        return mapToWalletResponse(wallet);
+    }
+
+    /** Check if wallet PIN is set */
+    @Transactional(readOnly = true)
+    public boolean hasPinSet() {
+        Wallet wallet = getOrCreateWallet();
+        return wallet.getPin() != null && !wallet.getPin().isEmpty();
+    }
+
+    /** Validate PIN format */
+    private void validatePin(String pin) {
+        if (pin == null || pin.isEmpty()) {
+            throw new AppException("PIN is required", HttpStatus.BAD_REQUEST);
+        }
+        if (pin.length() < 4 || pin.length() > 6 || !pin.matches("\\d+")) {
+            throw new AppException("PIN must be 4-6 digits", HttpStatus.BAD_REQUEST);
+        }
+    }
+
+    /** Map Wallet to DTO */
     private WalletResponse mapToWalletResponse(Wallet wallet) {
         return WalletResponse.builder()
                 .id(wallet.getId())
                 .userId(wallet.getUser().getId())
                 .userName(wallet.getUser().getFullName())
                 .balance(wallet.getBalance())
+                .heldBalance(wallet.getHeldBalance())
                 .createdAt(wallet.getCreatedAt())
                 .updatedAt(wallet.getUpdatedAt())
                 .build();
     }
 
-    /**
-     * Map a Transaction entity to a TransactionResponse DTO
-     * @param transaction the transaction entity
-     * @return the transaction response DTO
-     */
+    /** Map Transaction to DTO */
     private TransactionResponse mapToTransactionResponse(Transaction transaction) {
-        TransactionResponse.TransactionResponseBuilder builder = TransactionResponse.builder()
+        return TransactionResponse.builder()
                 .id(transaction.getId())
                 .walletId(transaction.getWallet().getId())
                 .amount(transaction.getAmount())
                 .type(transaction.getType())
                 .status(transaction.getStatus())
                 .description(transaction.getDescription())
+                .productId(transaction.getProduct() != null ? transaction.getProduct().getId() : null)
+                .productName(transaction.getProduct() != null ? transaction.getProduct().getName() : null)
                 .createdAt(transaction.getCreatedAt())
-                .updatedAt(transaction.getUpdatedAt())
-                .completedAt(transaction.getCompletedAt());
-        
-        // Add product information if available
-        if (transaction.getProduct() != null) {
-            builder.productId(transaction.getProduct().getId())
-                   .productName(transaction.getProduct().getName());
-        }
-        
-        return builder.build();
+                .completedAt(transaction.getCompletedAt())
+                .build();
     }
 }

@@ -4,17 +4,29 @@ import com.celebstash.backend.model.Product;
 import com.celebstash.backend.model.User;
 import com.celebstash.backend.model.enums.ProductStatus;
 import com.celebstash.backend.model.enums.ProductType;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface ProductRepository extends JpaRepository<Product, Long> {
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM Product p WHERE p.id = :id")
+    Optional<Product> findByIdForUpdate(@Param("id") Long id);
+
     // Find all products with a specific status
     List<Product> findByStatus(ProductStatus status);
+
+    // Find top approved products ordered by approval/creation date for New Drops
+    List<Product> findByStatusOrderByApprovedAtDescCreatedAtDesc(ProductStatus status);
 
     // Find all products by seller
     List<Product> findBySeller(User seller);

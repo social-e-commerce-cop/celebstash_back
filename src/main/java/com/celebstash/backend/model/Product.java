@@ -10,6 +10,10 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 @Data
 @Builder
@@ -32,10 +36,31 @@ public class Product {
     @Column(nullable = false)
     private BigDecimal price;
 
-    private String imageUrl;
+    @ElementCollection
+    @CollectionTable(name = "product_images", joinColumns = @JoinColumn(name = "product_id"))
+    @Column(name = "image_url")
+    private List<String> imageUrls = new ArrayList<>();
+
+    private String videoUrl;
 
     @Column(nullable = false)
     private Integer stockQuantity;
+
+    @Column
+    private String category;
+
+    @ElementCollection
+    @CollectionTable(name = "product_size_stock", joinColumns = @JoinColumn(name = "product_id"))
+    @MapKeyColumn(name = "size_name")
+    @Column(name = "quantity")
+    @Builder.Default
+    private Map<String, Integer> sizeStock = new HashMap<>();
+
+    @ElementCollection
+    @CollectionTable(name = "product_available_colors", joinColumns = @JoinColumn(name = "product_id"))
+    @Column(name = "color_name")
+    @Builder.Default
+    private List<String> availableColors = new ArrayList<>();
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -72,11 +97,18 @@ public class Product {
 
     private LocalDateTime approvedAt;
 
+    @Column(length = 1000)
+    private String adminNotes;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         if (status == null) {
             status = ProductStatus.PENDING;
+        }
+        // Set initialBidPrice to price if not already set
+        if (initialBidPrice == null && price != null) {
+            initialBidPrice = price;
         }
     }
 
