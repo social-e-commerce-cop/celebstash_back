@@ -58,6 +58,17 @@ public class MusicRelease {
 
     private LocalDateTime publicReleaseDate;
 
+    private LocalDateTime earlyAccessDate;
+
+    @Builder.Default
+    private boolean downloadAllowed = true;
+
+    private Long connectedEventId;
+
+    private String connectedProductIds;
+
+    private Long communityConversationId;
+
     private String language;
 
     private String countryOfOrigin;
@@ -93,6 +104,16 @@ public class MusicRelease {
     @Fetch(FetchMode.SUBSELECT)
     @Builder.Default
     private List<MusicTrack> tracks = new ArrayList<>();
+
+    @OneToMany(mappedBy = "release", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+    @Fetch(FetchMode.SUBSELECT)
+    @Builder.Default
+    private List<ReleaseBenefit> benefits = new ArrayList<>();
+
+    @OneToMany(mappedBy = "release", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+    @Fetch(FetchMode.SUBSELECT)
+    @Builder.Default
+    private List<MusicExclusiveContent> exclusiveContents = new ArrayList<>();
 
     @Column(nullable = false)
     private LocalDateTime createdAt;

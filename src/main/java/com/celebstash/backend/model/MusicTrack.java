@@ -23,7 +23,7 @@ public class MusicTrack {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "release_id", nullable = false)
     @JsonIgnore
     private MusicRelease release;
@@ -49,6 +49,15 @@ public class MusicTrack {
 
     @Builder.Default
     private boolean isExplicit = false;
+
+    @Builder.Default
+    private boolean isBonusTrack = false;
+
+    @Builder.Default
+    private Integer previewDurationSeconds = 5;
+
+    @Builder.Default
+    private boolean allowDownload = true;
 
     @Column(length = 4000)
     private String lyrics;

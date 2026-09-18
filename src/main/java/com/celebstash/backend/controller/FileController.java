@@ -16,6 +16,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import lombok.extern.slf4j.Slf4j;
@@ -70,27 +71,52 @@ public class FileController {
 
     @GetMapping("/{fileName:.+}")
     public ResponseEntity<Resource> downloadFile(@PathVariable String fileName, HttpServletRequest request) {
-        // Load file as Resource
-        Resource resource = fileStorageService.loadFileAsResource(fileName);
-
-        // Try to determine file's content type
-        String contentType = null;
-        try {
-            contentType = request.getServletContext().getMimeType(resource.getFile().getAbsolutePath());
-        } catch (IOException ex) {
-            // Logger would be used here in a production environment
-            System.out.println("Could not determine file type.");
+        String cleanFileName = cleanFileName(fileName);
+        Optional<com.celebstash.backend.model.StoredFile> sfOpt = fileStorageService.getStoredFile(cleanFileName);
+        if (sfOpt.isPresent()) {
+            com.celebstash.backend.model.StoredFile sf = sfOpt.get();
+            String contentType = sf.getContentType();
+            if (contentType == null || contentType.isBlank()) {
+                contentType = java.net.URLConnection.guessContentTypeFromName(cleanFileName);
+            }
+            if (contentType == null) {
+                contentType = "application/octet-stream";
+            }
+            org.springframework.core.io.ByteArrayResource resource = new org.springframework.core.io.ByteArrayResource(sf.getData()) {
+                @Override
+                public String getFilename() {
+                    return sf.getFileName();
+                }
+            };
+            long length = sf.getSize() != null ? sf.getSize() : (sf.getData() != null ? sf.getData().length : 0);
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(contentType))
+                    .contentLength(length)
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + sf.getFileName() + "\"")
+                    .header(HttpHeaders.CACHE_CONTROL, "public, max-age=31536000")
+                    .body(resource);
         }
 
-        // Fallback to the default content type if type could not be determined
+        Resource resource = fileStorageService.loadFileAsResource(cleanFileName);
+        String contentType = java.net.URLConnection.guessContentTypeFromName(cleanFileName);
         if (contentType == null) {
             contentType = "application/octet-stream";
         }
 
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(contentType))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + resource.getFilename() + "\"")
-                .body(resource);
+        try {
+            long length = resource.contentLength();
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(contentType))
+                    .contentLength(length)
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + resource.getFilename() + "\"")
+                    .header(HttpHeaders.CACHE_CONTROL, "public, max-age=31536000")
+                    .body(resource);
+        } catch (Exception e) {
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(contentType))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + resource.getFilename() + "\"")
+                    .body(resource);
+        }
     }
 
     @GetMapping("/stream/{fileName:.+}")
@@ -105,21 +131,61 @@ public class FileController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
 
-        Resource resource = fileStorageService.loadFileAsResource(fileName);
-        String contentType = null;
-        try {
-            contentType = request.getServletContext().getMimeType(resource.getFile().getAbsolutePath());
-        } catch (IOException ex) {
-            System.out.println("Could not determine file type.");
+        String cleanFileName = cleanFileName(fileName);
+        Optional<com.celebstash.backend.model.StoredFile> sfOpt = fileStorageService.getStoredFile(cleanFileName);
+        if (sfOpt.isPresent()) {
+            com.celebstash.backend.model.StoredFile sf = sfOpt.get();
+            String contentType = sf.getContentType();
+            if (contentType == null || contentType.isBlank()) {
+                contentType = java.net.URLConnection.guessContentTypeFromName(cleanFileName);
+            }
+            if (contentType == null) {
+                contentType = "application/octet-stream";
+            }
+            org.springframework.core.io.ByteArrayResource resource = new org.springframework.core.io.ByteArrayResource(sf.getData()) {
+                @Override
+                public String getFilename() {
+                    return sf.getFileName();
+                }
+            };
+            long length = sf.getSize() != null ? sf.getSize() : (sf.getData() != null ? sf.getData().length : 0);
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(contentType))
+                    .contentLength(length)
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + sf.getFileName() + "\"")
+                    .header(HttpHeaders.CACHE_CONTROL, "public, max-age=31536000")
+                    .body(resource);
         }
 
+        Resource resource = fileStorageService.loadFileAsResource(cleanFileName);
+        String contentType = java.net.URLConnection.guessContentTypeFromName(cleanFileName);
         if (contentType == null) {
             contentType = "application/octet-stream";
         }
 
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(contentType))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + resource.getFilename() + "\"")
-                .body(resource);
+        try {
+            long length = resource.contentLength();
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(contentType))
+                    .contentLength(length)
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + resource.getFilename() + "\"")
+                    .header(HttpHeaders.CACHE_CONTROL, "public, max-age=31536000")
+                    .body(resource);
+        } catch (Exception e) {
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(contentType))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + resource.getFilename() + "\"")
+                    .body(resource);
+        }
+    }
+
+    private String cleanFileName(String fileName) {
+        if (fileName == null) return "";
+        if (fileName.contains("/api/files/")) {
+            fileName = fileName.substring(fileName.lastIndexOf("/api/files/") + 11);
+        } else if (fileName.contains("/")) {
+            fileName = fileName.substring(fileName.lastIndexOf('/') + 1);
+        }
+        return fileName.trim();
     }
 }

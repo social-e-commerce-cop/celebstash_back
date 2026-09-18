@@ -62,6 +62,10 @@ public interface PostRepository extends JpaRepository<Post, Long> {
     @Query("SELECT p FROM Post p JOIN p.savedBy s WHERE s = :user ORDER BY p.createdAt DESC")
     Page<Post> findPostsSavedBy(@Param("user") User user, Pageable pageable);
 
+    // Paginated reposted posts
+    @Query("SELECT p FROM Post p JOIN p.repostedBy r WHERE r = :user ORDER BY p.createdAt DESC")
+    Page<Post> findPostsRepostedBy(@Param("user") User user, Pageable pageable);
+
     // Find all posts by user ordered by date
     Page<Post> findByUserOrderByCreatedAtDesc(User user, Pageable pageable);
 }

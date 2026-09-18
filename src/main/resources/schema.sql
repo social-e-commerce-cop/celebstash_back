@@ -38,3 +38,16 @@ ALTER TABLE IF EXISTS products DROP CONSTRAINT IF EXISTS products_product_type_c
 ALTER TABLE IF EXISTS orders DROP CONSTRAINT IF EXISTS orders_status_check;
 ALTER TABLE IF EXISTS reservations DROP CONSTRAINT IF EXISTS reservations_status_check;
 ALTER TABLE IF EXISTS posts DROP CONSTRAINT IF EXISTS posts_status_check;
+
+-- Stored files table for persisting uploaded images and media directly in PostgreSQL database
+CREATE TABLE IF NOT EXISTS stored_files (
+    id BIGSERIAL PRIMARY KEY,
+    file_name VARCHAR(255) NOT NULL UNIQUE,
+    original_file_name VARCHAR(255),
+    content_type VARCHAR(100),
+    size BIGINT,
+    data BYTEA,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_stored_files_name ON stored_files(file_name);
+

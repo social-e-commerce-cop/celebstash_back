@@ -66,7 +66,12 @@ public class SecurityConfig {
                     "/api/posts/user/**",
                     "/api/posts/*",
                     "/api/posts/*/comments",
-                    "/api/follow/users/**"
+                    "/api/posts/*/comments/**",
+                    "/api/follow/users/**",
+                    "/api/music/releases",
+                    "/api/music/releases/**",
+                    "/api/music/tracks/*/stream",
+                    "/api/music/tracks/*/access"
                 ).permitAll()
                 .anyRequest().authenticated()
             )

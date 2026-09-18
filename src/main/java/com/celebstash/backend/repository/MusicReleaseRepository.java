@@ -10,6 +10,7 @@ import java.util.List;
 @Repository
 public interface MusicReleaseRepository extends JpaRepository<MusicRelease, Long> {
     List<MusicRelease> findByArtistOrderByCreatedAtDesc(User artist);
+    List<MusicRelease> findByArtistAndStatusOrderByCreatedAtDesc(User artist, String status);
     List<MusicRelease> findByStatusOrderByCreatedAtDesc(String status);
     List<MusicRelease> findAllByOrderByCreatedAtDesc();
 }
