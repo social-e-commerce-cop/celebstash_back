@@ -38,46 +38,28 @@ public class PostResponse {
     private long repostsCount;
     private long savesCount;
 
-<<<<<<< HEAD
     // User interactions.
     // The fields drop the "is" prefix so that Lombok's isLiked()/isSaved() getters resolve to
     // the same Jackson property as the field, and @JsonProperty then names it once on the wire.
     // Clients read "isLiked"/"isSaved"; naming the fields isLiked/isSaved instead would publish
     // both "liked" and "isLiked" for the same value.
-    @com.fasterxml.jackson.annotation.JsonProperty("isLiked")
+    @JsonProperty("isLiked")
     private boolean liked;
-    @com.fasterxml.jackson.annotation.JsonProperty("isShared")
-    private boolean shared;
-    @com.fasterxml.jackson.annotation.JsonProperty("isReposted")
-    private boolean reposted;
-    @com.fasterxml.jackson.annotation.JsonProperty("isSaved")
-    private boolean saved;
-=======
-    // User interactions
-    @JsonProperty("isLiked")
-    private boolean isLiked;
     @JsonProperty("isShared")
-    private boolean isShared;
+    private boolean shared;
     @JsonProperty("isReposted")
-    private boolean isReposted;
+    private boolean reposted;
     @JsonProperty("isSaved")
-    private boolean isSaved;
->>>>>>> d8b0c20a20f1fe235107c9e84bc1b64c7958d5ad
+    private boolean saved;
 
-    @JsonProperty("isLiked")
-    public boolean isLiked() {
-        return isLiked;
-    }
-
-    @JsonProperty("liked")
-    public boolean getLiked() {
-        return isLiked;
-    }
+    // No hand-written like accessors: Lombok generates isLiked() for the "liked" field above,
+    // and the @JsonProperty there already publishes it as "isLiked". A second getter exposing
+    // "liked" would emit the same value under two keys.
 
     // Comments (optional, may be loaded separately)
     private List<CommentResponse> comments;
 
-    @com.fasterxml.jackson.annotation.JsonProperty("isSponsored")
+    @JsonProperty("isSponsored")
     private boolean sponsored;
     private String sponsorName;
 

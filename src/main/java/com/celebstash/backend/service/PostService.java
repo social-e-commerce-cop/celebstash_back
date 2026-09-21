@@ -714,18 +714,11 @@ public class PostService {
                 .commentsCount(commentsCount)
                 .sharesCount(sharesCount)
                 .repostsCount(repostsCount)
-<<<<<<< HEAD
+                .savesCount(savesCount)
                 .liked(isLiked)
                 .shared(false)
                 .reposted(isReposted)
                 .saved(isSaved)
-=======
-                .savesCount(savesCount)
-                .isLiked(isLiked)
-                .isShared(false)
-                .isReposted(isReposted)
-                .isSaved(isSaved)
->>>>>>> d8b0c20a20f1fe235107c9e84bc1b64c7958d5ad
                 .createdAt(post.getCreatedAt())
                 .updatedAt(post.getUpdatedAt())
                 .product(post.getProduct() != null ? mapToProductResponse(post.getProduct()) : null)
@@ -791,20 +784,13 @@ public class PostService {
                 .userUsername(comment.getUser() != null ? comment.getUser().getUsername() : null)
                 .userImageUrl(comment.getUser() != null ? comment.getUser().getProfilePicture() : null)
                 .content(comment.getContent())
-<<<<<<< HEAD
-                .createdAt(comment.getCreatedAt())
-                .updatedAt(comment.getUpdatedAt())
-                .parentId(comment.getParent() != null ? comment.getParent().getId() : null)
-                .reply(comment.isReply())
-=======
                 .createdAt(toInstant(comment.getCreatedAt()))
                 .updatedAt(toInstant(comment.getUpdatedAt()))
                 .parentId(parentId)
                 .parentUserId(parentUserId)
                 .parentUserName(parentUserName)
-                .isReply(isReply)
-                .isSelfReply(isSelfReply)
->>>>>>> d8b0c20a20f1fe235107c9e84bc1b64c7958d5ad
+                .reply(isReply)
+                .selfReply(isSelfReply)
                 .likesCount(likesCount)
                 .repliesCount(repliesCount)
                 .liked(isLiked)
@@ -849,11 +835,11 @@ public class PostService {
                 .parentId(parentId)
                 .parentUserId(parentUserId)
                 .parentUserName(parentUserName)
-                .isReply(isReply)
-                .isSelfReply(isSelfReply)
+                .reply(isReply)
+                .selfReply(isSelfReply)
                 .likesCount(likesCount)
                 .repliesCount(0)
-                .isLiked(isLiked)
+                .liked(isLiked)
                 .replies(new ArrayList<>())
                 .build();
     }

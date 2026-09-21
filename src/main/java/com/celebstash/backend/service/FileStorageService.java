@@ -1,12 +1,9 @@
 package com.celebstash.backend.service;
 
-<<<<<<< HEAD
-import com.cloudinary.Cloudinary;
-import com.cloudinary.utils.ObjectUtils;
-=======
 import com.celebstash.backend.model.StoredFile;
 import com.celebstash.backend.repository.StoredFileRepository;
->>>>>>> d8b0c20a20f1fe235107c9e84bc1b64c7958d5ad
+import com.cloudinary.Cloudinary;
+import com.cloudinary.utils.ObjectUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
@@ -24,16 +21,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-<<<<<<< HEAD
-import java.nio.file.StandardCopyOption;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-=======
 import java.time.LocalDateTime;
 import java.util.*;
->>>>>>> d8b0c20a20f1fe235107c9e84bc1b64c7958d5ad
 
 @Slf4j
 @Service
@@ -43,24 +32,30 @@ public class FileStorageService {
     private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
     private final Path fileStorageLocation;
 
-<<<<<<< HEAD
     /**
      * Cloudinary client, or {@code null} when no credentials are configured.
      *
-     * <p>Uploads written to the container filesystem do not survive a redeploy on a PaaS, so a
-     * deployed instance must push media to durable storage instead. When Cloudinary is configured
-     * uploads go there and the public CDN URL is returned; otherwise the original local-disk
-     * behaviour is kept so local development works with no extra setup.
+     * <p>Storage precedence: Cloudinary when configured (CDN-backed, durable), otherwise the
+     * {@code stored_files} table in Postgres, which also survives a redeploy. The local
+     * filesystem is only a last-resort read path for files written before either existed.
      */
     private final Cloudinary cloudinary;
     private final String cloudinaryFolder;
 
+    /** Opt-in backfill of the local upload directory into the database. Off by default. */
+    private final boolean migrateLocalFilesToDb;
+
     public FileStorageService(
+            StoredFileRepository storedFileRepository,
+            org.springframework.jdbc.core.JdbcTemplate jdbcTemplate,
             @Value("${file.upload-dir:uploads}") String uploadDir,
+            @Value("${file.migrate-local-to-db:false}") boolean migrateLocalFilesToDb,
             @Value("${cloudinary.url:}") String cloudinaryUrl,
             @Value("${cloudinary.folder:celebstash}") String cloudinaryFolder) {
-        this.fileStorageLocation = Paths.get(uploadDir)
-                .toAbsolutePath().normalize();
+        this.migrateLocalFilesToDb = migrateLocalFilesToDb;
+        this.storedFileRepository = storedFileRepository;
+        this.jdbcTemplate = jdbcTemplate;
+        this.fileStorageLocation = Paths.get(uploadDir).toAbsolutePath().normalize();
         this.cloudinaryFolder = cloudinaryFolder;
 
         Cloudinary client = null;
@@ -70,23 +65,13 @@ public class FileStorageService {
                 client.config.secure = true;
                 log.info("Cloudinary storage enabled (folder '{}'); uploads will be stored remotely.", cloudinaryFolder);
             } catch (Exception ex) {
-                log.error("CLOUDINARY_URL is set but could not be parsed; falling back to local disk storage. Cause: {}",
+                log.error("CLOUDINARY_URL is set but could not be parsed; storing uploads in the database instead. Cause: {}",
                         ex.getMessage());
             }
         } else {
-            log.warn("Cloudinary is not configured — uploads go to the local filesystem '{}'. "
-                    + "On a platform with an ephemeral filesystem these files are lost on redeploy.", this.fileStorageLocation);
+            log.info("Cloudinary is not configured — uploads will be stored in the stored_files database table.");
         }
         this.cloudinary = client;
-=======
-    public FileStorageService(
-            StoredFileRepository storedFileRepository,
-            org.springframework.jdbc.core.JdbcTemplate jdbcTemplate,
-            @Value("${file.upload-dir:uploads}") String uploadDir) {
-        this.storedFileRepository = storedFileRepository;
-        this.jdbcTemplate = jdbcTemplate;
-        this.fileStorageLocation = Paths.get(uploadDir).toAbsolutePath().normalize();
->>>>>>> d8b0c20a20f1fe235107c9e84bc1b64c7958d5ad
 
         try {
             Files.createDirectories(this.fileStorageLocation);
@@ -192,9 +177,11 @@ public class FileStorageService {
     /**
      * Ensure database table exists, and auto-migrate any existing files from local uploads/ directory into PostgreSQL database.
      */
+    /**
+     * Creates the stored_files table if absent. Cheap, so it stays on the startup path.
+     */
     @PostConstruct
-    public void migrateExistingFilesToDatabase() {
-        // Guarantee stored_files table exists in PostgreSQL database
+    public void ensureStoredFilesTable() {
         try {
             jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS stored_files (
@@ -212,7 +199,31 @@ public class FileStorageService {
         } catch (Exception ex) {
             log.warn("Could not verify/create stored_files table (may already exist): {}", ex.getMessage());
         }
+    }
 
+    /**
+     * Copies files sitting in the local upload directory into {@code stored_files}.
+     *
+     * <p>Runs only when {@code file.migrate-local-to-db} is enabled, and then on a background
+     * thread after the application is serving. It used to run from {@code @PostConstruct}, which
+     * blocked startup: with a populated upload directory it streams every file into Postgres over
+     * the network before the HTTP port is ever opened, so a platform port-scan times out and the
+     * deploy is killed. It also copies media into the database, which then bills storage and
+     * egress for every view — when Cloudinary is configured, new uploads bypass this entirely.
+     */
+    @org.springframework.context.event.EventListener(
+            org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    public void migrateExistingFilesToDatabase() {
+        if (!migrateLocalFilesToDb) {
+            return;
+        }
+
+        Thread worker = new Thread(this::copyLocalFilesIntoDatabase, "local-upload-migration");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private void copyLocalFilesIntoDatabase() {
         try {
             File dir = this.fileStorageLocation.toFile();
             if (dir.exists() && dir.isDirectory()) {

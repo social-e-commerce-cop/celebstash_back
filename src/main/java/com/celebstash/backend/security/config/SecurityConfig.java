@@ -47,13 +47,18 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-<<<<<<< HEAD
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .authorizeHttpRequests(auth -> auth
+                        // NOTE: "/api/files/**" is deliberately NOT listed here. Listing it
+                        // permits every method, which makes POST /api/files/upload anonymous —
+                        // anyone on the internet could write files to the service. Reads are
+                        // opened up per-method further down instead.
                         .requestMatchers(
                                 "/",
                                 "/error",
+                                // Required by the platform health check (/actuator/health/readiness);
+                                // without it the probe gets 403 and the deploy is marked unhealthy.
                                 "/actuator/**",
                                 "/api/v1/auth/**",
                                 "/v3/api-docs/**",
@@ -77,45 +82,17 @@ public class SecurityConfig {
                                 "/api/posts/user/**",
                                 "/api/posts/*",
                                 "/api/posts/*/comments",
-                                "/api/follow/users/**")
+                                "/api/posts/*/comments/**",
+                                "/api/follow/users/**",
+                                "/api/music/releases",
+                                "/api/music/releases/**",
+                                "/api/music/tracks/*/stream",
+                                "/api/music/tracks/*/access")
                         .permitAll()
                         .anyRequest().authenticated())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authenticationProvider(authenticationProvider())
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
-=======
-            .csrf(AbstractHttpConfigurer::disable)
-            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers(
-                    "/api/v1/auth/**",
-                    "/api/files/**",
-                    "/api-docs/**",
-                    "/swagger-ui/**",
-                    "/swagger-ui.html",
-                    "/ws/**"           // WebSocket SockJS handshake
-                ).permitAll()
-                .requestMatchers(org.springframework.http.HttpMethod.GET, 
-                    "/api/files/**",
-                    "/api/posts",
-                    "/api/posts/feed",
-                    "/api/posts/discovery",
-                    "/api/posts/user/**",
-                    "/api/posts/*",
-                    "/api/posts/*/comments",
-                    "/api/posts/*/comments/**",
-                    "/api/follow/users/**",
-                    "/api/music/releases",
-                    "/api/music/releases/**",
-                    "/api/music/tracks/*/stream",
-                    "/api/music/tracks/*/access"
-                ).permitAll()
-                .anyRequest().authenticated()
-            )
-            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .authenticationProvider(authenticationProvider())
-            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
->>>>>>> d8b0c20a20f1fe235107c9e84bc1b64c7958d5ad
 
         return http.build();
     }
