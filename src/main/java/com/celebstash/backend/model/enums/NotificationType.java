@@ -1,6 +1,9 @@
 package com.celebstash.backend.model.enums;
 
 public enum NotificationType {
+    // Chat
+    NEW_MESSAGE,
+
     // Legacy / Existing (Do not remove yet)
     CART_EXPIRING_SOON,
     ORDER_STATUS,

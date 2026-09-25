@@ -11,5 +11,9 @@ public record SendMessageRequest(
     String documentName,
     String documentSize,
     Long replyToId,
-    String systemText
+    String systemText,
+    /** Required when type == PRODUCT. Server validates the product exists before persisting. */
+    Long productId,
+    /** Required when type == POST. Server validates the post exists before persisting. */
+    Long postId
 ) {}
