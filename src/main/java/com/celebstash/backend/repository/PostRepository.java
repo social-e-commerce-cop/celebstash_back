@@ -68,4 +68,16 @@ public interface PostRepository extends JpaRepository<Post, Long> {
 
     // Find all posts by user ordered by date
     Page<Post> findByUserOrderByCreatedAtDesc(User user, Pageable pageable);
+
+    /**
+     * Home feed: every post with the given status, posts by {@code priorityUserIds} (followed
+     * accounts and the viewer) ranked ahead of the rest, newest first within each group. The id
+     * tie-break keeps page boundaries stable when two posts share a timestamp.
+     */
+    @Query(value = "SELECT p FROM Post p JOIN FETCH p.user u WHERE p.status = :status " +
+            "ORDER BY CASE WHEN u.id IN :priorityUserIds THEN 0 ELSE 1 END, p.createdAt DESC, p.id DESC",
+            countQuery = "SELECT COUNT(p) FROM Post p WHERE p.status = :status")
+    Page<Post> findRankedFeed(@Param("status") com.celebstash.backend.model.enums.PostStatus status,
+                              @Param("priorityUserIds") java.util.Collection<Long> priorityUserIds,
+                              Pageable pageable);
 }

@@ -26,4 +26,19 @@ public interface StoryRepository extends JpaRepository<Story, Long> {
 
     @Query("SELECT s FROM Story s WHERE s.user = :user AND (s.isArchived = true OR s.expiresAt <= :now) ORDER BY s.createdAt DESC")
     List<Story> findArchivedStoriesByUser(@Param("user") User user, @Param("now") LocalDateTime now);
+
+    /** Live stories whose author has one of the given roles, oldest first, author loaded. */
+    @Query("SELECT s FROM Story s JOIN FETCH s.user u WHERE s.isArchived = false AND s.expiresAt > :now " +
+            "AND u.role IN :roles ORDER BY s.createdAt ASC")
+    List<Story> findActiveStoriesByAuthorRoles(@Param("now") LocalDateTime now,
+                                               @Param("roles") java.util.Collection<com.celebstash.backend.model.enums.Role> roles);
+
+    /** Stories past their expiry that the cleanup job has not archived yet. */
+    @Query("SELECT s FROM Story s WHERE s.isArchived = false AND s.expiresAt <= :now")
+    List<Story> findExpiredUnarchived(@Param("now") LocalDateTime now);
+
+    /** Atomic increment, so simultaneous viewers cannot overwrite each other's count. */
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("UPDATE Story s SET s.viewCount = s.viewCount + 1 WHERE s.id = :storyId")
+    int incrementViewCount(@Param("storyId") Long storyId);
 }

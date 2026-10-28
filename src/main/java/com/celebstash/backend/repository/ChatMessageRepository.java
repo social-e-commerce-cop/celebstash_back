@@ -18,6 +18,9 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
 
     Page<ChatMessage> findByConversationOrderBySentAtAsc(ChatConversation conversation, Pageable pageable);
 
+    /** A message this sender already stored under the given client id (idempotent send). */
+    java.util.Optional<ChatMessage> findFirstBySenderIdAndClientMessageId(Long senderId, String clientMessageId);
+
     /**
      * Messages in a conversation, excluding any the caller hid via "delete for me".
      * Filtering in the query (rather than after paging) keeps page sizes correct — dropping rows

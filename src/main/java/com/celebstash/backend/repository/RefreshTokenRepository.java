@@ -5,6 +5,7 @@ import com.celebstash.backend.model.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,4 +30,8 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
     void deleteAllByUser(User user);
     
     boolean existsByTokenAndRevokedFalse(String token);
+
+    /** Unrevoked, unexpired tokens still stored in the legacy bcrypt format. */
+    @Query("SELECT r FROM RefreshToken r JOIN FETCH r.user WHERE r.revoked = false AND r.expiryDate > :now AND r.token NOT LIKE :digestPattern")
+    List<RefreshToken> findActiveLegacyTokens(@Param("now") java.time.Instant now, @Param("digestPattern") String digestPattern);
 }

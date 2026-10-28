@@ -30,6 +30,12 @@ public class ChatController {
         return ResponseEntity.ok(chatService.getMyConversations());
     }
 
+    @GetMapping("/unread-count")
+    @Operation(summary = "Total unread messages across all conversations")
+    public ResponseEntity<java.util.Map<String, Long>> getUnreadCount() {
+        return ResponseEntity.ok(java.util.Map.of("count", chatService.getTotalUnreadCount()));
+    }
+
     @GetMapping("/conversations/{id}")
     @Operation(summary = "Get a single conversation with its current participants")
     public ResponseEntity<ConversationDto> getConversation(@PathVariable Long id) {
@@ -147,7 +153,17 @@ public class ChatController {
     public ResponseEntity<MessageDto> sendMessage(
             @PathVariable Long id,
             @Valid @RequestBody SendMessageRequest req) {
-        return ResponseEntity.ok(chatService.sendMessage(id, req));
+        try {
+            return ResponseEntity.ok(chatService.sendMessage(id, req));
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            // Two copies of the same send (double tap, retry while the first was in flight) raced
+            // past the idempotency check; the unique index kept only one. Answer the loser with
+            // the stored message so the client reconciles instead of showing a failure.
+            if (req.clientMessageId() == null || req.clientMessageId().isBlank()) throw e;
+            return chatService.findOwnMessageByClientId(req.clientMessageId().trim())
+                    .map(ResponseEntity::ok)
+                    .orElseThrow(() -> e);
+        }
     }
 
     @PutMapping("/messages/{id}")

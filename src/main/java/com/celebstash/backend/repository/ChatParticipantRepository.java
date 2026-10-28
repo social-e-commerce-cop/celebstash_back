@@ -14,4 +14,9 @@ public interface ChatParticipantRepository extends JpaRepository<ChatParticipant
     Optional<ChatParticipant> findByConversationAndUser(ChatConversation conversation, User user);
 
     boolean existsByConversationAndUser(ChatConversation conversation, User user);
+
+    /** Total unread messages across all of a user's conversations, for the inbox badge. */
+    @org.springframework.data.jpa.repository.Query(
+            "SELECT COALESCE(SUM(p.unreadCount), 0) FROM ChatParticipant p WHERE p.user.id = :userId")
+    long sumUnreadForUser(@org.springframework.data.repository.query.Param("userId") Long userId);
 }

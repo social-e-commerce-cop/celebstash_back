@@ -44,6 +44,15 @@ public class Notification {
     @Column(name = "related_entity_id")
     private Long relatedEntityId;
 
+    /**
+     * The user whose action produced this notification (who liked, commented, followed, sent the
+     * message). Null for system notifications such as order or KYC updates. It lets the client
+     * show the actor's avatar and open their profile.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "actor_id")
+    private User actor;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();

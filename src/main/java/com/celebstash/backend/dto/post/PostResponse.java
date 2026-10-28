@@ -69,6 +69,12 @@ public class PostResponse {
     private String attachedSubtitle;
     private String attachedPrice;
 
+    // Whether the viewer follows the post's author. Set by the home feed, which already knows the
+    // viewer's follow list; null elsewhere, in which case clients check the follow status
+    // themselves. Lets the feed render its follow buttons without one request per post.
+    @JsonProperty("isFollowingAuthor")
+    private Boolean followingAuthor;
+
     // Recent likers for the post
     private List<com.celebstash.backend.dto.user.UserPublicDTO> recentLikers;
 

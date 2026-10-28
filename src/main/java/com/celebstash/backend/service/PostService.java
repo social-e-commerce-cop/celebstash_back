@@ -91,6 +91,7 @@ public class PostService {
                     try {
                         notificationService.createNotification(
                                 f.getFollower(),
+                                user,
                                 "New Post from " + user.getFullName(),
                                 user.getFullName() + " posted: " + (post.getDescription() != null && post.getDescription().length() > 50 
                                         ? post.getDescription().substring(0, 50) + "..." : (post.getDescription() != null ? post.getDescription() : "New update")),
@@ -109,26 +110,45 @@ public class PostService {
         return mapToResponse(savedPost, user);
     }
 
-    // ----------------- HOME FEED (FOLLOWED ARTISTS + DISCOVERY) -----------------
+    /** Upper bound on a feed page so a client cannot request thousands of posts at once. */
+    private static final int MAX_FEED_PAGE_SIZE = 50;
+
+    // ----------------- HOME FEED (FOLLOWED ACCOUNTS FIRST, THEN EVERYONE ELSE) -----------------
+    /**
+     * One ranked, paginated stream over all active posts:
+     * <ol>
+     *   <li>posts from accounts the viewer follows (and the viewer's own posts), newest first;</li>
+     *   <li>then every other account's posts, newest first.</li>
+     * </ol>
+     * Previously the feed returned only followed accounts' posts whenever any existed, so other
+     * accounts never appeared, and it switched to a different query mid-pagination once those ran out.
+     */
     @Transactional(readOnly = true)
     public Page<PostResponse> getHomeFeed(Long userId, Pageable pageable) {
         User currentUser = userId != null ? userRepository.findById(userId).orElse(null) : null;
 
-        if (currentUser != null) {
-            List<Follower> following = followerRepository.findByFollower(currentUser);
-            List<User> followedUsers = following.stream().map(Follower::getFollowing).toList();
+        java.util.Set<Long> followedIds = currentUser != null
+                ? new java.util.HashSet<>(followerRepository.findFollowingIds(currentUser.getId()))
+                : java.util.Set.of();
 
-            if (!followedUsers.isEmpty()) {
-                Page<Post> followedPosts = postRepository.findByUsersOrderByCreatedAtDesc(followedUsers, pageable);
-                if (!followedPosts.isEmpty()) {
-                    return followedPosts.map(post -> mapToResponse(post, currentUser));
-                }
-            }
+        List<Long> priorityUserIds = new ArrayList<>(followedIds);
+        if (currentUser != null) {
+            priorityUserIds.add(currentUser.getId());
+        }
+        if (priorityUserIds.isEmpty()) {
+            priorityUserIds.add(-1L); // an empty IN () list is invalid SQL
         }
 
-        // Fallback to all active posts if no followed posts or unauthenticated
-        return postRepository.findAllByStatusOrderByCreatedAtDesc(PostStatus.ACTIVE, pageable)
-                .map(post -> mapToResponse(post, currentUser));
+        // The ranking is the query's ORDER BY; a client-supplied sort would override it.
+        Pageable page = org.springframework.data.domain.PageRequest.of(
+                pageable.getPageNumber(), Math.min(Math.max(pageable.getPageSize(), 1), MAX_FEED_PAGE_SIZE));
+
+        return postRepository.findRankedFeed(PostStatus.ACTIVE, priorityUserIds, page)
+                .map(post -> {
+                    PostResponse response = mapToResponse(post, currentUser);
+                    response.setFollowingAuthor(currentUser != null && followedIds.contains(post.getUser().getId()));
+                    return response;
+                });
     }
 
     // ----------------- DISCOVERY FEED -----------------
@@ -229,22 +249,17 @@ public class PostService {
         Post post = postRepository.findById(postId)
                 .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
 
-        boolean alreadyLiked = likeRepository.existsByUserAndLikeableTypeAndLikeableId(
-                user, LikeableType.POST, postId
-        );
+        // Idempotent insert: a double tap, or two devices liking at once, can no longer race past
+        // an exists-check into the unique constraint and fail the request with a 500.
+        boolean newlyLiked = likeRepository.insertIfAbsent(
+                userId, LikeableType.POST.name(), postId, LocalDateTime.now()) > 0;
 
-        if (!alreadyLiked) {
-            Like like = Like.builder()
-                    .user(user)
-                    .likeableType(LikeableType.POST)
-                    .likeableId(postId)
-                    .build();
-            likeRepository.save(like);
-
+        if (newlyLiked) {
             if (!post.getUser().getId().equals(userId)) {
                 try {
                     notificationService.createNotification(
                             post.getUser(),
+                            user,
                             "New Like",
                             user.getFullName() + " liked your post.",
                             NotificationType.LIKE,
@@ -309,6 +324,7 @@ public class PostService {
                 try {
                     notificationService.createNotification(
                             post.getUser(),
+                            user,
                             "New Repost",
                             user.getFullName() + " reposted your post.",
                             NotificationType.REPOST,
@@ -452,6 +468,7 @@ public class PostService {
                 try {
                     notificationService.createNotification(
                             parent.getUser(),
+                            user,
                             "New Reply",
                             user.getFullName() + " replied to your comment: " + (comment.getContent().length() > 50 ? comment.getContent().substring(0, 50) + "..." : comment.getContent()),
                             NotificationType.COMMENT,
@@ -463,11 +480,14 @@ public class PostService {
             }
         }
 
-        // Notify post owner if commenter is not post author
-        if (!post.getUser().getId().equals(userId)) {
+        // Notify post owner if commenter is not post author. A reply to the owner's own comment
+        // already produced a "New Reply" notification above, so it is not announced twice.
+        boolean ownerAlreadyNotified = parent != null && parent.getUser().getId().equals(post.getUser().getId());
+        if (!post.getUser().getId().equals(userId) && !ownerAlreadyNotified) {
             try {
                 notificationService.createNotification(
                         post.getUser(),
+                        user,
                         "New Comment",
                         user.getFullName() + " commented: " + (comment.getContent().length() > 50 ? comment.getContent().substring(0, 50) + "..." : comment.getContent()),
                         NotificationType.COMMENT,
@@ -492,6 +512,7 @@ public class PostService {
                         try {
                             notificationService.createNotification(
                                     taggedUser,
+                                    user,
                                     "Mentioned in Comment",
                                     user.getFullName() + " tagged you in a comment",
                                     NotificationType.COMMENT,
@@ -524,9 +545,10 @@ public class PostService {
             try {
                 notificationService.createNotification(
                         comment.getUser(),
+                        user,
                         "Comment Liked",
                         user.getFullName() + " liked your comment",
-                        NotificationType.LIKE,
+                        NotificationType.LIKE_COMMENT_ACTIVITY,
                         comment.getPost() != null ? comment.getPost().getId() : null
                 );
             } catch (Exception e) {
@@ -844,30 +866,35 @@ public class PostService {
                 .build();
     }
 
+    /** Upper bound on the likers list returned in one response. */
+    private static final int MAX_LIKERS_LISTED = 200;
+
     @Transactional(readOnly = true)
     public List<UserPublicDTO> getPostLikes(Long postId) {
         Post post = postRepository.findById(postId)
                 .orElseThrow(() -> new AppException("Post not found", HttpStatus.NOT_FOUND));
 
-        List<User> likers = new ArrayList<>();
-        if (post.getLikedBy() != null && !post.getLikedBy().isEmpty()) {
-            likers.addAll(post.getLikedBy());
-        } else {
-            List<Like> likes = likeRepository.findAllByLikeableTypeAndLikeableId(LikeableType.POST, postId);
-            for (Like l : likes) {
-                if (l.getUser() != null && !likers.contains(l.getUser())) {
-                    likers.add(l.getUser());
-                }
-            }
-        }
+        // The likes table is the single source of truth: it is what likesCount and isLiked are
+        // computed from. This list used to prefer the legacy post_likes join table whenever it had
+        // any rows, so likers recorded only in `likes` were missing and the list disagreed with
+        // the count. Newest likers first, like the "Liked by" preview.
+        List<User> likers = likeRepository
+                .findRecentLikesByPost(post.getId(), org.springframework.data.domain.PageRequest.of(0, MAX_LIKERS_LISTED))
+                .stream()
+                .map(Like::getUser)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
 
+        // Public list: no email or phone number. Those are login identifiers of other users.
         return likers.stream()
                 .map(user -> UserPublicDTO.builder()
                         .id(user.getId())
                         .fullName(user.getFullName())
-                        .username(user.getUsername())
-                        .email(user.getEmail())
-                        .phoneNumber(user.getPhoneNumber())
+                        .username(user.getUsername() != null
+                                && !user.getUsername().equals(user.getEmail())
+                                && !user.getUsername().equals(user.getPhoneNumber())
+                                ? user.getUsername() : null)
                         .bio(user.getBio())
                         .profilePicture(user.getProfilePicture())
                         .role(user.getRole() != null ? user.getRole().name() : "USER")

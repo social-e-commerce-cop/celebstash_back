@@ -198,6 +198,18 @@ public class ChatService {
                 .map(m -> toMessageDto(m, me));
     }
 
+    /** The caller's own message stored under a client id, if any (see sendMessage). */
+    @Transactional
+    public Optional<MessageDto> findOwnMessageByClientId(String clientMessageId) {
+        User me = userService.getCurrentUser();
+        return messageRepo.findFirstBySenderIdAndClientMessageId(me.getId(), clientMessageId)
+                .map(m -> toMessageDto(m, me));
+    }
+
+    public long getTotalUnreadCount() {
+        return participantRepo.sumUnreadForUser(userService.getCurrentUser().getId());
+    }
+
     @Transactional
     public Page<MessageDto> getMessages(Long conversationId, int page, int size) {
         User me = userService.getCurrentUser();
@@ -212,10 +224,17 @@ public class ChatService {
             participantRepo.save(p);
         });
 
+        // Opening the thread is reading it: its message notifications no longer count as unread.
+        notificationService.markReadByTarget(me, NotificationType.NEW_MESSAGE, conv.getId());
+
+        // Page 0 is the NEWEST messages; higher pages go further back in history. Paging oldest
+        // first meant a conversation longer than one page only ever showed its oldest messages,
+        // so anything sent recently vanished from the thread after a reload.
         // Messages this user hid via "delete for me" are excluded in the query, so paging stays
         // correct — they remain visible to everyone else.
         Page<ChatMessage> msgs = messageRepo.findVisibleForUser(
-                conv, me.getId(), PageRequest.of(page, size, Sort.by("sentAt").ascending()));
+                conv, me.getId(),
+                PageRequest.of(page, size, Sort.by(Sort.Order.desc("sentAt"), Sort.Order.desc("id"))));
 
         // Tell the other participants how far this user has read, so their ticks update live.
         msgs.getContent().stream()
@@ -224,7 +243,12 @@ public class ChatService {
                 .ifPresent(lastId -> publish(conv.getId(), ChatEvent.MESSAGE_READ,
                         new ChatEvent.ReadPayload(me.getId(), lastId)));
 
-        return msgs.map(m -> toMessageDto(m, me));
+        // Each page is returned oldest-to-newest so it can be rendered top-to-bottom as is.
+        List<MessageDto> chronological = new ArrayList<>(
+                msgs.getContent().stream().map(m -> toMessageDto(m, me)).toList());
+        Collections.reverse(chronological);
+        return new org.springframework.data.domain.PageImpl<>(
+                chronological, msgs.getPageable(), msgs.getTotalElements());
     }
 
     // ── Send a message ───────────────────────────────────────────────────────
@@ -233,6 +257,19 @@ public class ChatService {
     public MessageDto sendMessage(Long conversationId, SendMessageRequest req) {
         User me = userService.getCurrentUser();
         ChatConversation conv = getConvForUser(conversationId, me);
+
+        // Idempotent retry: the client already sent this message (the first response was lost to
+        // a timeout or the user tapped retry). Return what is stored; nothing is re-broadcast,
+        // re-counted as unread or re-notified.
+        String clientMessageId = req.clientMessageId() != null && !req.clientMessageId().isBlank()
+                ? req.clientMessageId().trim()
+                : null;
+        if (clientMessageId != null) {
+            Optional<ChatMessage> existing = messageRepo.findFirstBySenderIdAndClientMessageId(me.getId(), clientMessageId);
+            if (existing.isPresent()) {
+                return toMessageDto(existing.get(), me);
+            }
+        }
 
         ChatMessage.ChatMessageBuilder builder = ChatMessage.builder()
                 .conversation(conv)
@@ -243,7 +280,8 @@ public class ChatService {
                 .voiceDuration(req.voiceDuration())
                 .documentName(req.documentName())
                 .documentSize(req.documentSize())
-                .systemText(req.systemText());
+                .systemText(req.systemText())
+                .clientMessageId(clientMessageId);
 
         if (req.replyToId() != null) {
             // A reply must point at a message in this same conversation — otherwise a crafted
@@ -358,6 +396,7 @@ public class ChatService {
             try {
                 notificationService.createNotification(
                         recipient,
+                        sender,
                         title,
                         conv.getType() == ConversationType.GROUP
                                 ? sender.getFullName() + ": " + preview
@@ -844,7 +883,8 @@ public class ChatService {
                 reactionDtos,
                 msg.getSentAt(),
                 productRef,
-                postRef
+                postRef,
+                msg.getClientMessageId()
         );
     }
 }

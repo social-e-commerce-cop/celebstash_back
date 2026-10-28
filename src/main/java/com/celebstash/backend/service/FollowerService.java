@@ -56,6 +56,7 @@ public class FollowerService {
         try {
             notificationService.createNotification(
                     following,
+                    currentUser,
                     "New Follower",
                     currentUser.getFullName() + " started following you.",
                     NotificationType.NEW_FOLLOWER,

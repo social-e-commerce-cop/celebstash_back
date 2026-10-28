@@ -51,3 +51,25 @@ CREATE TABLE IF NOT EXISTS stored_files (
 );
 CREATE INDEX IF NOT EXISTS idx_stored_files_name ON stored_files(file_name);
 
+
+-- Social core (2026-10-21). Mirrors src/main/resources/db/2026-10-21-social-core.sql for local
+-- development; production applies that file manually because SQL init is disabled there.
+ALTER TABLE IF EXISTS notifications ADD COLUMN IF NOT EXISTS actor_id BIGINT REFERENCES users(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id) WHERE read = false;
+ALTER TABLE IF EXISTS chat_messages ADD COLUMN IF NOT EXISTS client_message_id VARCHAR(64);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_chat_messages_sender_client_id ON chat_messages(sender_id, client_message_id) WHERE client_message_id IS NOT NULL;
+DELETE FROM likes a USING likes b WHERE a.id > b.id AND a.user_id = b.user_id AND a.likeable_type = b.likeable_type AND a.likeable_id = b.likeable_id;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_likes_user_item ON likes(user_id, likeable_type, likeable_id);
+DELETE FROM story_reactions a USING story_reactions b WHERE a.id < b.id AND a.story_id = b.story_id AND a.user_id = b.user_id;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_story_reactions_story_user ON story_reactions(story_id, user_id);
+DELETE FROM story_views a USING story_views b WHERE a.id > b.id AND a.story_id = b.story_id AND a.viewer_id = b.viewer_id;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_story_views_story_viewer ON story_views(story_id, viewer_id);
+CREATE INDEX IF NOT EXISTS idx_posts_status_created ON posts(status, created_at DESC);
+
+-- Legacy NOT NULL stories.type column (from an older StoryType design) is no longer mapped by the
+-- Story entity, so every story insert failed. Make it optional; the ADD keeps this valid on databases
+-- that never had the column.
+ALTER TABLE IF EXISTS stories ADD COLUMN IF NOT EXISTS type VARCHAR(255);
+ALTER TABLE IF EXISTS stories ALTER COLUMN type DROP NOT NULL;
+ALTER TABLE IF EXISTS story_views ADD COLUMN IF NOT EXISTS user_id BIGINT;

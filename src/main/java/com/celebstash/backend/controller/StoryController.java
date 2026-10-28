@@ -2,6 +2,7 @@ package com.celebstash.backend.controller;
 
 import com.celebstash.backend.dto.StoryRequest;
 import com.celebstash.backend.dto.StoryResponse;
+import com.celebstash.backend.dto.story.StoryViewerResponse;
 import com.celebstash.backend.model.User;
 import com.celebstash.backend.service.StoryService;
 import com.celebstash.backend.service.UserService;
@@ -54,14 +55,26 @@ public class StoryController {
     }
 
     @PostMapping("/{storyId}/react")
-    public ResponseEntity<Map<String, String>> reactToStory(
+    public ResponseEntity<Map<String, Object>> reactToStory(
             @PathVariable Long storyId,
             @RequestBody Map<String, String> body,
             Principal principal) {
         User user = userService.getUserFromPrincipal(principal);
         String emoji = body.getOrDefault("emoji", "❤️");
-        storyService.reactToStory(storyId, user, emoji);
-        return ResponseEntity.ok(Map.of("message", "Reaction recorded"));
+        return ResponseEntity.ok(storyService.reactToStory(storyId, user, emoji));
+    }
+
+    @DeleteMapping("/{storyId}/react")
+    public ResponseEntity<Map<String, Object>> removeReaction(@PathVariable Long storyId, Principal principal) {
+        User user = userService.getUserFromPrincipal(principal);
+        return ResponseEntity.ok(storyService.removeReaction(storyId, user));
+    }
+
+    /** Viewers of one of the caller's own stories, with their reactions. */
+    @GetMapping("/{storyId}/viewers")
+    public ResponseEntity<List<StoryViewerResponse>> getViewers(@PathVariable Long storyId, Principal principal) {
+        User user = userService.getUserFromPrincipal(principal);
+        return ResponseEntity.ok(storyService.getStoryViewers(storyId, user));
     }
 
     @PostMapping("/{storyId}/reply")

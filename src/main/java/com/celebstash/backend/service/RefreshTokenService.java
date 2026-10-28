@@ -11,7 +11,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -26,10 +30,29 @@ public class RefreshTokenService {
     @Value("${app.jwt.refresh-token.expiration}")
     private long refreshTokenExpiration;
 
+    /**
+     * Prefix marking a token stored as a SHA-256 digest.
+     *
+     * <p>Refresh tokens are random 122-bit UUIDs, so a fast deterministic digest is safe and, unlike
+     * bcrypt, can be looked up by index. Tokens issued before this change were stored as bcrypt
+     * hashes; those are still accepted through {@link #findLegacyBcryptToken} until they expire.
+     */
+    private static final String SHA256_PREFIX = "sha256:";
+
+    private static String digest(String tokenValue) {
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256")
+                    .digest(tokenValue.getBytes(StandardCharsets.UTF_8));
+            return SHA256_PREFIX + HexFormat.of().formatHex(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
+        }
+    }
+
     @Transactional
     public RefreshToken createRefreshToken(User user, HttpServletRequest request) {
         String tokenValue = UUID.randomUUID().toString();
-        String hashedToken = passwordEncoder.encode(tokenValue);
+        String hashedToken = digest(tokenValue);
         
         RefreshToken refreshToken = RefreshToken.builder()
                 .user(user)
@@ -50,9 +73,24 @@ public class RefreshTokenService {
 
     @Transactional
     public Optional<RefreshToken> validateRefreshToken(String token) {
-        return refreshTokenRepository.findAll().stream()
-                .filter(storedToken -> !storedToken.isRevoked() && !storedToken.isExpired() 
-                        && passwordEncoder.matches(token, storedToken.getToken()))
+        if (token == null || token.isBlank()) {
+            return Optional.empty();
+        }
+        Optional<RefreshToken> stored = refreshTokenRepository.findByToken(digest(token));
+        if (stored.isEmpty()) {
+            stored = findLegacyBcryptToken(token);
+        }
+        return stored.filter(t -> !t.isRevoked() && !t.isExpired());
+    }
+
+    /**
+     * Previously every refresh compared the presented token against every row in the table with
+     * bcrypt, so each refresh got slower as tokens accumulated. Only live legacy rows are scanned
+     * now, and that set shrinks to nothing as old tokens expire or are rotated.
+     */
+    private Optional<RefreshToken> findLegacyBcryptToken(String token) {
+        return refreshTokenRepository.findActiveLegacyTokens(Instant.now(), SHA256_PREFIX + "%").stream()
+                .filter(storedToken -> passwordEncoder.matches(token, storedToken.getToken()))
                 .findFirst();
     }
 

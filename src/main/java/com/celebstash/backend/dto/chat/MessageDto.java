@@ -30,7 +30,9 @@ public record MessageDto(
     /** Present when type == PRODUCT. Read live from the product system on every fetch. */
     SharedProductDto sharedProduct,
     /** Present when type == POST. Read live from the post system on every fetch. */
-    SharedPostDto sharedPost
+    SharedPostDto sharedPost,
+    /** Echo of SendMessageRequest.clientMessageId; null for messages sent without one. */
+    String clientMessageId
 ) {
     public record ReplyRefDto(
         Long messageId,

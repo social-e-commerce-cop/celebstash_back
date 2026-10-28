@@ -29,6 +29,19 @@ public interface LikeRepository extends JpaRepository<Like, Long> {
 
     void deleteAllByLikeableTypeAndLikeableId(LikeableType likeableType, Long likeableId);
 
+    /**
+     * Inserts the like unless the same user already liked the same item. Returns 1 when a row was
+     * written, 0 when it already existed. Backed by the unique index on (user_id, likeable_type,
+     * likeable_id), so concurrent requests cannot create a duplicate.
+     */
+    @Modifying
+    @Query(value = "INSERT INTO likes (user_id, likeable_type, likeable_id, created_at) " +
+            "VALUES (:userId, :likeableType, :likeableId, :createdAt) ON CONFLICT DO NOTHING", nativeQuery = true)
+    int insertIfAbsent(@Param("userId") Long userId,
+                       @Param("likeableType") String likeableType,
+                       @Param("likeableId") Long likeableId,
+                       @Param("createdAt") java.time.LocalDateTime createdAt);
+
     void deleteByUserAndLikeableTypeAndLikeableId(User user, LikeableType likeableType, Long likeableId);
 
     @Modifying

@@ -86,6 +86,15 @@ public class ChatMessage {
     // System text (e.g., "You created this group")
     private String systemText;
 
+    /**
+     * Id the sending client generated for this message before it was saved. The client uses it to
+     * match the server's copy (REST response or socket echo) to its optimistic bubble, and the
+     * server uses it to make a retried send return the existing message instead of storing a
+     * second one. Unique per sender (see schema.sql).
+     */
+    @Column(name = "client_message_id", length = 64)
+    private String clientMessageId;
+
     @Enumerated(EnumType.STRING)
     @Builder.Default
     private MessageReadStatus readStatus = MessageReadStatus.SENT;

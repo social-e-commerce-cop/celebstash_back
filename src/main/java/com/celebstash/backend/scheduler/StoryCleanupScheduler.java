@@ -23,15 +23,16 @@ public class StoryCleanupScheduler {
     @Scheduled(cron = "0 */15 * * * *")
     public void archiveExpiredStories() {
         LocalDateTime now = LocalDateTime.now();
-        List<Story> activeStories = storyRepository.findAllActiveStories(now);
-        
+        // Feed queries already exclude anything past expiresAt, so this only tidies the flag. It
+        // previously loaded the ACTIVE stories (by definition not expired) and so never archived
+        // anything.
+        List<Story> expired = storyRepository.findExpiredUnarchived(now);
+
         int archivedCount = 0;
-        for (Story story : activeStories) {
-            if (story.isExpired()) {
-                story.setArchived(true);
-                storyRepository.save(story);
-                archivedCount++;
-            }
+        for (Story story : expired) {
+            story.setArchived(true);
+            storyRepository.save(story);
+            archivedCount++;
         }
 
         if (archivedCount > 0) {

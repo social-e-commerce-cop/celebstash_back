@@ -15,4 +15,8 @@ public interface FollowerRepository extends JpaRepository<Follower, Long> {
     long countByFollowing(User following);
     List<Follower> findByFollower(User follower);
     List<Follower> findByFollowing(User following);
+
+    /** Ids of the accounts a user follows, without loading the User rows. */
+    @org.springframework.data.jpa.repository.Query("SELECT f.following.id FROM Follower f WHERE f.follower.id = :followerId")
+    List<Long> findFollowingIds(@org.springframework.data.repository.query.Param("followerId") Long followerId);
 }
