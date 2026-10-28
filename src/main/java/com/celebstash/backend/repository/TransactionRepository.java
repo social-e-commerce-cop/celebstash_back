@@ -30,4 +30,16 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
 
     // Find all transactions for a product with a specific type and status
     List<Transaction> findByProductAndTypeAndStatus(Product product, TransactionType type, TransactionStatus status);
+
+    // Find transaction by unique reference ID
+    java.util.Optional<Transaction> findByReference(String reference);
+
+    // Find transaction by external reference
+    java.util.Optional<Transaction> findByExternalReference(String externalReference);
+
+    // Find pending transactions by status and type that have references for reconciliation
+    List<Transaction> findByStatusAndTypeAndReferenceIsNotNull(TransactionStatus status, TransactionType type);
+
+    // Find all pending transactions that have references
+    List<Transaction> findByStatusAndReferenceIsNotNull(TransactionStatus status);
 }

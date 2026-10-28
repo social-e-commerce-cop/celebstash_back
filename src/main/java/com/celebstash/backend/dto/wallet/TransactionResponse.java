@@ -21,6 +21,13 @@ public class TransactionResponse {
     private TransactionType type;
     private TransactionStatus status;
     private String description;
+    private String reference;
+    private String externalReference;
+    private String provider;
+    private String phoneNumber;
+    private String currency;
+    private BigDecimal beforeBalance;
+    private BigDecimal afterBalance;
     private Long productId;
     private String productName;
     private LocalDateTime createdAt;

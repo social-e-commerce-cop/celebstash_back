@@ -12,6 +12,17 @@ ALTER TABLE IF EXISTS stories ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAU
 ALTER TABLE IF EXISTS wallets ADD COLUMN IF NOT EXISTS held_balance NUMERIC(38, 2) DEFAULT 0.00;
 ALTER TABLE IF EXISTS wallets ADD COLUMN IF NOT EXISTS pin VARCHAR(6);
 
+-- Alter transactions table for payment gateways and tracking
+ALTER TABLE IF EXISTS transactions ADD COLUMN IF NOT EXISTS reference VARCHAR(100);
+ALTER TABLE IF EXISTS transactions ADD COLUMN IF NOT EXISTS external_reference VARCHAR(100);
+ALTER TABLE IF EXISTS transactions ADD COLUMN IF NOT EXISTS provider VARCHAR(50);
+ALTER TABLE IF EXISTS transactions ADD COLUMN IF NOT EXISTS phone_number VARCHAR(50);
+ALTER TABLE IF EXISTS transactions ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'RWF';
+ALTER TABLE IF EXISTS transactions ADD COLUMN IF NOT EXISTS before_balance NUMERIC(19, 2);
+ALTER TABLE IF EXISTS transactions ADD COLUMN IF NOT EXISTS after_balance NUMERIC(19, 2);
+CREATE INDEX IF NOT EXISTS idx_transactions_reference ON transactions(reference);
+CREATE INDEX IF NOT EXISTS idx_transactions_external_ref ON transactions(external_reference);
+
 -- Alter users table to guarantee new user columns exist
 ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS account_verified BOOLEAN DEFAULT FALSE;
 ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS account_verified_at TIMESTAMP;
@@ -38,6 +49,8 @@ ALTER TABLE IF EXISTS products DROP CONSTRAINT IF EXISTS products_product_type_c
 ALTER TABLE IF EXISTS orders DROP CONSTRAINT IF EXISTS orders_status_check;
 ALTER TABLE IF EXISTS reservations DROP CONSTRAINT IF EXISTS reservations_status_check;
 ALTER TABLE IF EXISTS posts DROP CONSTRAINT IF EXISTS posts_status_check;
+ALTER TABLE IF EXISTS transactions DROP CONSTRAINT IF EXISTS transactions_type_check;
+ALTER TABLE IF EXISTS transactions DROP CONSTRAINT IF EXISTS transactions_status_check;
 
 -- Stored files table for persisting uploaded images and media directly in PostgreSQL database
 CREATE TABLE IF NOT EXISTS stored_files (
@@ -50,4 +63,17 @@ CREATE TABLE IF NOT EXISTS stored_files (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_stored_files_name ON stored_files(file_name);
+
+-- Real playback events log for tracking music release and track plays
+CREATE TABLE IF NOT EXISTS music_plays (
+    id BIGSERIAL PRIMARY KEY,
+    release_id BIGINT NOT NULL REFERENCES music_releases(id) ON DELETE CASCADE,
+    track_id BIGINT REFERENCES music_tracks(id) ON DELETE SET NULL,
+    user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    played_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    duration_seconds INT
+);
+CREATE INDEX IF NOT EXISTS idx_music_plays_release ON music_plays(release_id);
+CREATE INDEX IF NOT EXISTS idx_music_plays_user ON music_plays(user_id);
+CREATE INDEX IF NOT EXISTS idx_music_plays_played_at ON music_plays(played_at);
 

@@ -56,7 +56,8 @@ public class SecurityConfig {
                     "/api-docs/**",
                     "/swagger-ui/**",
                     "/swagger-ui.html",
-                    "/ws/**"           // WebSocket SockJS handshake
+                    "/ws/**",          // WebSocket SockJS handshake
+                    "/api/wallet/webhook/**" // Payment provider webhooks
                 ).permitAll()
                 .requestMatchers(org.springframework.http.HttpMethod.GET, 
                     "/api/files/**",
@@ -72,6 +73,9 @@ public class SecurityConfig {
                     "/api/music/releases/**",
                     "/api/music/tracks/*/stream",
                     "/api/music/tracks/*/access"
+                ).permitAll()
+                .requestMatchers(org.springframework.http.HttpMethod.POST,
+                    "/api/music/tracks/*/play"
                 ).permitAll()
                 .anyRequest().authenticated()
             )

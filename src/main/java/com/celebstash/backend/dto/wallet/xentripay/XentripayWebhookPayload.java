@@ -1,0 +1,26 @@
+package com.celebstash.backend.dto.wallet.xentripay;
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.math.BigDecimal;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class XentripayWebhookPayload {
+    private String refid;
+    private String tid;
+    private String status; // "SUCCESS", "FAILED", "CANCELLED"
+    private BigDecimal amount;
+    private String msisdn;
+    private String currency;
+    private String timestamp;
+    private String signature;
+    private String message;
+}

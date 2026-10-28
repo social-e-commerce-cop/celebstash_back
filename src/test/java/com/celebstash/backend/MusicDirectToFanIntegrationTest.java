@@ -83,6 +83,7 @@ public class MusicDirectToFanIntegrationTest {
                 jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS music_exclusive_contents (id BIGSERIAL PRIMARY KEY, release_id BIGINT NOT NULL REFERENCES music_releases(id) ON DELETE CASCADE, title VARCHAR(255) NOT NULL, description VARCHAR(2000), content_type VARCHAR(100) NOT NULL DEFAULT 'VIDEO', media_url VARCHAR(500) NOT NULL, thumbnail_url VARCHAR(500), sort_order INT DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);");
                 jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS music_waitlists (id BIGSERIAL PRIMARY KEY, release_id BIGINT NOT NULL REFERENCES music_releases(id) ON DELETE CASCADE, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE, notified BOOLEAN DEFAULT FALSE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, CONSTRAINT uk_music_waitlist_user_release UNIQUE (user_id, release_id));");
                 jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS music_access (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE, release_id BIGINT NOT NULL REFERENCES music_releases(id) ON DELETE CASCADE, transaction_id BIGINT REFERENCES transactions(id), status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE', granted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, is_gift BOOLEAN DEFAULT FALSE, gifted_by_id BIGINT REFERENCES users(id), gift_message VARCHAR(1000), granted_benefits_snapshot VARCHAR(4000), CONSTRAINT uk_music_access_user_release UNIQUE (user_id, release_id));");
+                jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS music_plays (id BIGSERIAL PRIMARY KEY, release_id BIGINT NOT NULL REFERENCES music_releases(id) ON DELETE CASCADE, track_id BIGINT REFERENCES music_tracks(id) ON DELETE SET NULL, user_id BIGINT REFERENCES users(id) ON DELETE SET NULL, played_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, duration_seconds INT);");
                 jdbcTemplate.execute("ALTER TABLE IF EXISTS notifications DROP CONSTRAINT IF EXISTS notifications_type_check;");
             } catch (Exception ignored) {}
 
@@ -408,5 +409,82 @@ public class MusicDirectToFanIntegrationTest {
         assertTrue(publicArtistReleases.stream().anyMatch(r -> r.getId().equals(testReleaseId)));
         assertFalse(publicArtistReleases.stream().anyMatch(r -> "Secret Unfinished Demo".equals(r.getTitle())),
                 "Drafts must never appear in public artist profile");
+    }
+
+    @Test
+    @Order(15)
+    @DisplayName("Test 15 — Artist Song Details: Ownership Authorization & Initial Zero State")
+    void test15_artistSongDetailsAndAuthorization() {
+        assertNotNull(testReleaseId);
+
+        // 1. Non-owner cannot view artist song details (403 Forbidden)
+        assertThrows(AppException.class, () -> musicService.getArtistSongDetails(testReleaseId, fan),
+                "Fans must be denied access to private artist details");
+        assertThrows(AppException.class, () -> musicService.getArtistSongDetails(testReleaseId, otherFan),
+                "Other fans must be denied access to private artist details");
+
+        // 2. Owner artist can fetch song details
+        ArtistSongDetailsDto details = musicService.getArtistSongDetails(testReleaseId, artist);
+        assertNotNull(details);
+        assertEquals("Afro Fusion EP", details.getTitle());
+        assertEquals("Afrobeats", details.getGenre());
+        assertNotNull(details.getActivity7Days());
+        assertEquals(7, details.getActivity7Days().size());
+        assertNotNull(details.getActivity30Days());
+        assertEquals(30, details.getActivity30Days().size());
+    }
+
+    @Test
+    @Order(16)
+    @DisplayName("Test 16 — Record Play: Validates Real Play Count, Unique Listeners & Replays")
+    void test16_recordPlayAndMetrics() {
+        assertNotNull(testTrackId);
+        assertNotNull(testReleaseId);
+
+        ArtistSongDetailsDto before = musicService.getArtistSongDetails(testReleaseId, artist);
+        long initialPlays = before.getTotalPlays();
+
+        // 1. First play by fan
+        musicService.recordPlay(testTrackId, fan);
+
+        ArtistSongDetailsDto after1 = musicService.getArtistSongDetails(testReleaseId, artist);
+        assertEquals(initialPlays + 1, after1.getTotalPlays(), "Total plays must increment by 1");
+
+        // 2. Replay by same fan
+        musicService.recordPlay(testTrackId, fan);
+
+        ArtistSongDetailsDto after2 = musicService.getArtistSongDetails(testReleaseId, artist);
+        assertEquals(initialPlays + 2, after2.getTotalPlays(), "Total plays must increment by 2");
+        assertTrue(after2.getReplays() >= 1, "Replays must be at least 1 after repeated listening");
+    }
+
+    @Test
+    @Order(17)
+    @DisplayName("Test 17 — Archive Release: Hides from public but preserves history and access")
+    void test17_archiveRelease() {
+        assertNotNull(testReleaseId);
+
+        // Non-owner cannot archive
+        assertThrows(AppException.class, () -> musicService.archiveRelease(testReleaseId, fan));
+
+        // Owner archives release
+        MusicRelease archived = musicService.archiveRelease(testReleaseId, artist);
+        assertEquals("ARCHIVED", archived.getStatus());
+
+        // Must not appear in public browse
+        List<MusicRelease> publicReleases = musicService.getAllReleases();
+        assertFalse(publicReleases.stream().anyMatch(r -> r.getId().equals(testReleaseId)),
+                "Archived releases must be hidden from public browsing");
+
+        // Fan who paid for access still retains access in their library
+        List<MusicRelease> fanLibrary = musicService.getUserPurchasedReleases(fan);
+        assertTrue(fanLibrary.stream().anyMatch(r -> r.getId().equals(testReleaseId)),
+                "Fans must retain previously unlocked access even if the song is archived");
+
+        // Owner can unarchive release
+        MusicRelease unarchived = musicService.unarchiveRelease(testReleaseId, artist);
+        assertEquals("PUBLISHED", unarchived.getStatus());
+        assertTrue(musicService.getAllReleases().stream().anyMatch(r -> r.getId().equals(testReleaseId)),
+                "Unarchived release must be visible again");
     }
 }

@@ -18,6 +18,7 @@ public class WalletResponse {
     private String userName;
     private BigDecimal balance;
     private BigDecimal heldBalance;
+    private boolean hasPinSet;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

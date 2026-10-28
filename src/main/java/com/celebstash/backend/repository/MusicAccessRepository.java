@@ -20,6 +20,7 @@ public interface MusicAccessRepository extends JpaRepository<MusicAccess, Long> 
     List<MusicAccess> findByUserAndStatusOrderByGrantedAtDesc(User user, MusicAccessStatus status);
     List<MusicAccess> findByUserOrderByGrantedAtDesc(User user);
     long countByReleaseAndStatus(MusicRelease release, MusicAccessStatus status);
+    List<MusicAccess> findByReleaseAndStatusOrderByGrantedAtDesc(MusicRelease release, MusicAccessStatus status);
 
     @Query("SELECT ma FROM MusicAccess ma WHERE ma.release.artist = :artist ORDER BY ma.grantedAt DESC")
     List<MusicAccess> findByArtistReleases(@Param("artist") User artist);

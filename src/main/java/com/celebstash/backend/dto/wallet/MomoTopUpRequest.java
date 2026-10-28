@@ -24,4 +24,6 @@ public class MomoTopUpRequest {
 
     @NotBlank(message = "Provider (MTN / AIRTEL) is required")
     private String provider;
+
+    private String idempotencyKey;
 }

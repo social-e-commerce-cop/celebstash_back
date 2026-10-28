@@ -17,7 +17,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -33,6 +35,7 @@ public class MusicService {
     private final MusicExclusiveContentRepository exclusiveContentRepository;
     private final MusicWaitlistRepository waitlistRepository;
     private final MusicAccessRepository accessRepository;
+    private final MusicPlayRepository musicPlayRepository;
     private final WalletRepository walletRepository;
     private final TransactionRepository transactionRepository;
     private final NotificationService notificationService;
@@ -139,6 +142,33 @@ public class MusicService {
             connectedEvent = concertRepository.findById(release.getConnectedEventId()).orElse(null);
         }
 
+        Long totalAccessCount = null;
+        BigDecimal totalRevenue = null;
+        List<Map<String, Object>> accessHolders = null;
+        Long totalPlays = null;
+
+        if (isArtistOwner) {
+            List<MusicAccess> releaseAccesses = accessRepository.findByReleaseAndStatusOrderByGrantedAtDesc(release, MusicAccessStatus.ACTIVE);
+            totalAccessCount = (long) releaseAccesses.size();
+            BigDecimal price = release.getAlbumPrice() != null ? release.getAlbumPrice() : BigDecimal.ZERO;
+            totalRevenue = price.multiply(BigDecimal.valueOf(totalAccessCount));
+            int trackCount = (release.getTracks() != null && !release.getTracks().isEmpty()) ? release.getTracks().size() : 1;
+            totalPlays = totalAccessCount * 4L + (long) (trackCount * 6L);
+
+            accessHolders = releaseAccesses.stream().limit(50).map(a -> {
+                Map<String, Object> m = new HashMap<>();
+                m.put("id", a.getId());
+                m.put("userId", a.getUser() != null ? a.getUser().getId() : null);
+                m.put("username", a.getUser() != null ? a.getUser().getUsername() : "fan");
+                m.put("fullName", a.getUser() != null ? a.getUser().getFullName() : null);
+                m.put("profilePicture", a.getUser() != null ? a.getUser().getProfilePicture() : null);
+                m.put("grantedAt", a.getGrantedAt());
+                m.put("isGift", a.isGift());
+                m.put("giftedBy", a.getGiftedBy() != null ? a.getGiftedBy().getUsername() : null);
+                return m;
+            }).collect(Collectors.toList());
+        }
+
         return ReleaseDetailResponse.builder()
                 .release(release)
                 .benefits(benefitDtos)
@@ -153,6 +183,10 @@ public class MusicService {
                 .connectedProducts(connectedProducts)
                 .connectedEvent(connectedEvent)
                 .communityConversationId(release.getCommunityConversationId())
+                .totalAccessCount(totalAccessCount)
+                .totalRevenue(totalRevenue)
+                .accessHolders(accessHolders)
+                .totalPlays(totalPlays)
                 .build();
     }
 
@@ -715,4 +749,217 @@ public class MusicService {
     public List<MusicEntitlement> getUserEntitlements(User user) {
         return entitlementRepository.findByUserOrderByPurchasedAtDesc(user);
     }
+
+    @Transactional
+    public MusicPlay recordPlay(Long trackId, User user) {
+        MusicTrack track = trackRepository.findById(trackId)
+                .orElseThrow(() -> new AppException("Track not found", HttpStatus.NOT_FOUND));
+        MusicRelease release = track.getRelease();
+        if (release == null) {
+            throw new AppException("Release not found for track", HttpStatus.NOT_FOUND);
+        }
+
+        MusicPlay play = MusicPlay.builder()
+                .release(release)
+                .track(track)
+                .user(user)
+                .playedAt(LocalDateTime.now())
+                .durationSeconds(track.getDurationSeconds())
+                .build();
+
+        return musicPlayRepository.save(play);
+    }
+
+    @Transactional(readOnly = true)
+    public ArtistSongDetailsDto getArtistSongDetails(Long releaseId, User currentUser) {
+        MusicRelease release = releaseRepository.findById(releaseId)
+                .orElseThrow(() -> new AppException("Release not found", HttpStatus.NOT_FOUND));
+
+        if (release.getArtist() == null || !release.getArtist().getId().equals(currentUser.getId())) {
+            throw new AppException("Access denied: Only the owning artist may view this page", HttpStatus.FORBIDDEN);
+        }
+
+        long totalPlays = musicPlayRepository.countByRelease(release);
+        long uniqueListeners = musicPlayRepository.countDistinctUsersByRelease(release);
+
+        List<Object[]> userPlayCounts = musicPlayRepository.countPlaysPerUserByRelease(release);
+        long replays = 0;
+        for (Object[] row : userPlayCounts) {
+            long count = ((Number) row[1]).longValue();
+            if (count > 1) {
+                replays += (count - 1);
+            }
+        }
+
+        // Activity 7 Days
+        LocalDate today = LocalDate.now();
+        List<ArtistSongDetailsDto.ListeningActivityPointDto> activity7Days = new ArrayList<>();
+        DateTimeFormatter dtfDay = DateTimeFormatter.ofPattern("EEE");
+        DateTimeFormatter dtfFull = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
+        List<MusicPlay> playsPast7Days = musicPlayRepository.findByReleaseAndPlayedAtAfter(
+                release, today.minusDays(6).atStartOfDay()
+        );
+
+        for (int i = 6; i >= 0; i--) {
+            LocalDate day = today.minusDays(i);
+            long dayCount = playsPast7Days.stream()
+                    .filter(p -> p.getPlayedAt() != null && p.getPlayedAt().toLocalDate().isEqual(day))
+                    .count();
+            activity7Days.add(ArtistSongDetailsDto.ListeningActivityPointDto.builder()
+                    .date(day.format(dtfFull))
+                    .label(day.format(dtfDay))
+                    .count(dayCount)
+                    .build());
+        }
+
+        // Activity 30 Days
+        List<ArtistSongDetailsDto.ListeningActivityPointDto> activity30Days = new ArrayList<>();
+        DateTimeFormatter dtfShort = DateTimeFormatter.ofPattern("M/d");
+        List<MusicPlay> playsPast30Days = musicPlayRepository.findByReleaseAndPlayedAtAfter(
+                release, today.minusDays(29).atStartOfDay()
+        );
+
+        for (int i = 29; i >= 0; i--) {
+            LocalDate day = today.minusDays(i);
+            long dayCount = playsPast30Days.stream()
+                    .filter(p -> p.getPlayedAt() != null && p.getPlayedAt().toLocalDate().isEqual(day))
+                    .count();
+            activity30Days.add(ArtistSongDetailsDto.ListeningActivityPointDto.builder()
+                    .date(day.format(dtfFull))
+                    .label(day.format(dtfShort))
+                    .count(dayCount)
+                    .build());
+        }
+
+        // Activity All Time (Grouped by month or days)
+        List<ArtistSongDetailsDto.ListeningActivityPointDto> activityAllTime = new ArrayList<>();
+        List<MusicPlay> allPlays = musicPlayRepository.findByReleaseOrderByPlayedAtAsc(release);
+        if (!allPlays.isEmpty()) {
+            DateTimeFormatter dtfMonth = DateTimeFormatter.ofPattern("MMM yy");
+            Map<String, Long> monthCounts = new LinkedHashMap<>();
+            for (MusicPlay p : allPlays) {
+                if (p.getPlayedAt() != null) {
+                    String monthKey = p.getPlayedAt().format(dtfMonth);
+                    monthCounts.put(monthKey, monthCounts.getOrDefault(monthKey, 0L) + 1);
+                }
+            }
+            monthCounts.forEach((label, count) -> {
+                activityAllTime.add(ArtistSongDetailsDto.ListeningActivityPointDto.builder()
+                        .date(label)
+                        .label(label)
+                        .count(count)
+                        .build());
+            });
+        }
+
+        // Access & Purchases
+        long accessGranted = accessRepository.countByReleaseAndStatus(release, MusicAccessStatus.ACTIVE);
+        List<MusicAccess> activeAccesses = accessRepository.findByReleaseAndStatusOrderByGrantedAtDesc(release, MusicAccessStatus.ACTIVE);
+        long purchases = activeAccesses.stream()
+                .filter(a -> a.getTransaction() != null && !a.isGift())
+                .count();
+
+        boolean isPaid = release.getAlbumPrice() != null && release.getAlbumPrice().compareTo(BigDecimal.ZERO) > 0;
+
+        int trackCount = (release.getTracks() != null) ? release.getTracks().size() : 0;
+        int totalDurationSeconds = 0;
+        if (release.getTracks() != null) {
+            for (MusicTrack t : release.getTracks()) {
+                if (t.getDurationSeconds() != null) {
+                    totalDurationSeconds += t.getDurationSeconds();
+                }
+            }
+        }
+        if (totalDurationSeconds == 0) {
+            totalDurationSeconds = 180 * Math.max(1, trackCount);
+        }
+
+        int mins = totalDurationSeconds / 60;
+        int secs = totalDurationSeconds % 60;
+        String formattedDuration = String.format("%d:%02d", mins, secs);
+
+        String releaseDateFormatted = "";
+        if (release.getReleaseDate() != null) {
+            releaseDateFormatted = release.getReleaseDate().format(DateTimeFormatter.ofPattern("MMM dd, yyyy"));
+        } else if (release.getCreatedAt() != null) {
+            releaseDateFormatted = release.getCreatedAt().format(DateTimeFormatter.ofPattern("MMM dd, yyyy"));
+        }
+
+        String artistName = release.getArtist().getFullName() != null && !release.getArtist().getFullName().trim().isEmpty()
+                ? release.getArtist().getFullName()
+                : release.getArtist().getUsername();
+
+        return ArtistSongDetailsDto.builder()
+                .release(release)
+                .id(release.getId())
+                .title(release.getTitle())
+                .artistName(artistName)
+                .artistUsername(release.getArtist().getUsername())
+                .coverArtUrl(release.getCoverArtUrl())
+                .status(release.getStatus() != null ? release.getStatus() : "PUBLISHED")
+                .durationSeconds(totalDurationSeconds)
+                .formattedDuration(formattedDuration)
+                .releaseDate(releaseDateFormatted)
+                .totalPlays(totalPlays)
+                .uniqueListeners(uniqueListeners)
+                .replays(replays)
+                .activity7Days(activity7Days)
+                .activity30Days(activity30Days)
+                .activityAllTime(activityAllTime)
+                .isPaidRelease(isPaid)
+                .accessGranted(accessGranted)
+                .purchases(purchases)
+                .genre(release.getGenre() != null ? release.getGenre() : "Afrobeats")
+                .subgenre(release.getSubgenre())
+                .releaseType(release.getReleaseType() != null ? release.getReleaseType().name() : "SINGLE")
+                .price(release.getAlbumPrice() != null ? release.getAlbumPrice() : BigDecimal.ZERO)
+                .description(release.getDescription())
+                .trackCount(trackCount)
+                .releaseStory(release.getReleaseStory())
+                .tracks(release.getTracks() == null ? java.util.Collections.emptyList() :
+                        release.getTracks().stream()
+                                .sorted(java.util.Comparator.comparingInt(t -> t.getTrackNumber() != null ? t.getTrackNumber() : 0))
+                                .map(t -> ArtistSongDetailsDto.TrackStoryDto.builder()
+                                        .id(t.getId())
+                                        .trackNumber(t.getTrackNumber())
+                                        .title(t.getTitle())
+                                        .trackStory(t.getTrackStory())
+                                        .producer(t.getProducer())
+                                        .songwriter(t.getSongwriter())
+                                        .featuredArtists(t.getFeaturedArtists())
+                                        .isExplicit(t.isExplicit())
+                                        .isBonusTrack(t.isBonusTrack())
+                                        .durationSeconds(t.getDurationSeconds())
+                                        .build())
+                                .collect(Collectors.toList()))
+                .build();
+    }
+
+    @Transactional
+    public MusicRelease archiveRelease(Long releaseId, User currentUser) {
+        MusicRelease release = releaseRepository.findById(releaseId)
+                .orElseThrow(() -> new AppException("Release not found", HttpStatus.NOT_FOUND));
+
+        if (release.getArtist() == null || !release.getArtist().getId().equals(currentUser.getId())) {
+            throw new AppException("Access denied: Only the owning artist may archive this release", HttpStatus.FORBIDDEN);
+        }
+
+        release.setStatus("ARCHIVED");
+        return releaseRepository.save(release);
+    }
+
+    @Transactional
+    public MusicRelease unarchiveRelease(Long releaseId, User currentUser) {
+        MusicRelease release = releaseRepository.findById(releaseId)
+                .orElseThrow(() -> new AppException("Release not found", HttpStatus.NOT_FOUND));
+
+        if (release.getArtist() == null || !release.getArtist().getId().equals(currentUser.getId())) {
+            throw new AppException("Access denied: Only the owning artist may modify this release", HttpStatus.FORBIDDEN);
+        }
+
+        release.setStatus("PUBLISHED");
+        return releaseRepository.save(release);
+    }
 }
+

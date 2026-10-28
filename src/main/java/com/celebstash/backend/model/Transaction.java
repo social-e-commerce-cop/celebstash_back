@@ -40,6 +40,28 @@ public class Transaction {
 
     private String description;
 
+    @Column(name = "reference", length = 100)
+    private String reference;
+
+    @Column(name = "external_reference", length = 100)
+    private String externalReference;
+
+    @Column(name = "provider", length = 50)
+    private String provider;
+
+    @Column(name = "phone_number", length = 50)
+    private String phoneNumber;
+
+    @Column(name = "currency", length = 10)
+    @Builder.Default
+    private String currency = "RWF";
+
+    @Column(name = "before_balance")
+    private BigDecimal beforeBalance;
+
+    @Column(name = "after_balance")
+    private BigDecimal afterBalance;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "product_id")
     private Product product;
