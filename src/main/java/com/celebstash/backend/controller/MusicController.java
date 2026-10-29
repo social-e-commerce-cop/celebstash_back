@@ -168,7 +168,7 @@ public class MusicController {
             trackDurations.add(AudioPreviewUtil.durationSeconds(audioBytes));
         }
 
-        String coverUrl = fileStorageService.storeFile(coverArt);
+        String coverUrl = fileStorageService.storeFileAndGetPublicUrl(coverArt);
 
         LocalDateTime earlyAccessDate = null;
         if (earlyAccessDateStr != null && !earlyAccessDateStr.trim().isEmpty()) {
