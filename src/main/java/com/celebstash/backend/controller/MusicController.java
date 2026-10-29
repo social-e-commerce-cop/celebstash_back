@@ -31,6 +31,9 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
 
+import com.celebstash.backend.security.jwt.JwtUtils;
+import org.springframework.util.StringUtils;
+
 @Slf4j
 @RestController
 @RequestMapping("/api/music")
@@ -41,6 +44,7 @@ public class MusicController {
     private final MusicService musicService;
     private final FileStorageService fileStorageService;
     private final UserRepository userRepository;
+    private final JwtUtils jwtUtils;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @GetMapping("/releases")
@@ -310,27 +314,27 @@ public class MusicController {
                 .orElseThrow(() -> new AppException("Track not found", HttpStatus.NOT_FOUND));
 
         User currentUser = getCurrentUser();
+        if (currentUser == null && StringUtils.hasText(tokenParam)) {
+            try {
+                String username = jwtUtils.extractUsername(tokenParam);
+                if (username != null) {
+                    currentUser = userRepository.findByUsername(username).orElse(null);
+                }
+            } catch (Exception ignored) {}
+        }
+
         Map<String, Object> access = musicService.verifyPlaybackAccess(currentUser, trackId);
         boolean hasFullAccess = (boolean) access.get("hasFullAccess");
 
         Resource audioResource = fileStorageService.loadFileAsResource(track.getAudioFileUrl());
 
         if (!hasFullAccess) {
-            // Clip audio to 5-second preview
-            try (InputStream is = audioResource.getInputStream()) {
-                byte[] allBytes = is.readAllBytes();
-                int previewLength = Math.min(allBytes.length, 5 * 64 * 1024 / 8); // Approx 5s chunk
-                byte[] previewBytes = Arrays.copyOfRange(allBytes, 0, previewLength);
-                ByteArrayResource previewResource = new ByteArrayResource(previewBytes);
-
-                return ResponseEntity.ok()
-                        .contentType(MediaType.parseMediaType("audio/mpeg"))
-                        .contentLength(previewBytes.length)
-                        .header("X-Preview-Only", "true")
-                        .body(previewResource);
-            } catch (Exception ex) {
-                return ResponseEntity.ok().contentType(MediaType.parseMediaType("audio/mpeg")).body(audioResource);
-            }
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType("audio/mpeg"))
+                    .header("Accept-Ranges", "bytes")
+                    .header("X-Preview-Only", "true")
+                    .header("X-Preview-Duration-Seconds", "5")
+                    .body(audioResource);
         }
 
         return ResponseEntity.ok()
@@ -391,6 +395,42 @@ public class MusicController {
         }
 
         return ResponseEntity.ok(musicService.getArtistReleases(targetArtist, status));
+    }
+
+    @GetMapping("/artist/releases/{id}/details")
+    @Operation(summary = "Get private artist release and song statistics, activity, and info")
+    @SecurityRequirement(name = "bearerAuth")
+    public ResponseEntity<ArtistSongDetailsDto> getArtistSongDetails(@PathVariable("id") Long id) {
+        User currentUser = getRequiredCurrentUser();
+        return ResponseEntity.ok(musicService.getArtistSongDetails(id, currentUser));
+    }
+
+    @PostMapping("/tracks/{id}/play")
+    @Operation(summary = "Record valid playback event for track/release")
+    public ResponseEntity<Map<String, Object>> recordPlay(@PathVariable("id") Long trackId) {
+        User currentUser = getCurrentUser();
+        MusicPlay play = musicService.recordPlay(trackId, currentUser);
+        Map<String, Object> resp = new HashMap<>();
+        resp.put("success", true);
+        resp.put("playId", play.getId());
+        resp.put("playedAt", play.getPlayedAt());
+        return ResponseEntity.ok(resp);
+    }
+
+    @PostMapping("/artist/releases/{id}/archive")
+    @Operation(summary = "Archive music release from public display while retaining historical data")
+    @SecurityRequirement(name = "bearerAuth")
+    public ResponseEntity<MusicRelease> archiveRelease(@PathVariable("id") Long id) {
+        User currentUser = getRequiredCurrentUser();
+        return ResponseEntity.ok(musicService.archiveRelease(id, currentUser));
+    }
+
+    @PostMapping("/artist/releases/{id}/unarchive")
+    @Operation(summary = "Unarchive music release back to published status")
+    @SecurityRequirement(name = "bearerAuth")
+    public ResponseEntity<MusicRelease> unarchiveRelease(@PathVariable("id") Long id) {
+        User currentUser = getRequiredCurrentUser();
+        return ResponseEntity.ok(musicService.unarchiveRelease(id, currentUser));
     }
 
     private User getCurrentUser() {

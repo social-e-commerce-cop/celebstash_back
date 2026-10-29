@@ -27,4 +27,10 @@ public class ReleaseDetailResponse {
     private List<Object> connectedProducts;
     private Object connectedEvent;
     private Long communityConversationId;
+
+    // Artist Monitoring Data (populated when isArtistOwner is true)
+    private Long totalAccessCount;
+    private java.math.BigDecimal totalRevenue;
+    private List<Map<String, Object>> accessHolders;
+    private Long totalPlays;
 }
