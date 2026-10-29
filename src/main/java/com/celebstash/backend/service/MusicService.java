@@ -48,11 +48,203 @@ public class MusicService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public List<MusicRelease> getAllReleases() {
-        return releaseRepository.findByStatusOrderByCreatedAtDesc("PUBLISHED");
+        return releaseRepository.findByStatusOrderByCreatedAtDesc(MusicRelease.STATUS_PUBLISHED);
     }
 
     public List<MusicRelease> getAllReleasesAdmin() {
         return releaseRepository.findAllByOrderByCreatedAtDesc();
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Visibility rules. Enforced here, not in the clients: anything that is not PUBLISHED is
+    // invisible to ordinary users, except an ARCHIVED release its existing Access holders keep.
+
+    private boolean isAdmin(User user) {
+        return user != null && user.getRole() == Role.ADMIN;
+    }
+
+    private boolean isOwner(MusicRelease release, User user) {
+        return user != null && release.getArtist() != null && release.getArtist().getId().equals(user.getId());
+    }
+
+    private boolean hasActiveAccess(MusicRelease release, User user) {
+        return user != null && accessRepository.existsByUserAndReleaseAndStatus(user, release, MusicAccessStatus.ACTIVE);
+    }
+
+    public boolean canView(MusicRelease release, User user) {
+        String status = release.getStatus();
+        if (MusicRelease.STATUS_PUBLISHED.equalsIgnoreCase(status)) {
+            return true;
+        }
+        if (isOwner(release, user) || isAdmin(user)) {
+            return true;
+        }
+        return MusicRelease.STATUS_ARCHIVED.equalsIgnoreCase(status) && hasActiveAccess(release, user);
+    }
+
+    private MusicRelease getVisibleRelease(Long releaseId, User user) {
+        MusicRelease release = releaseRepository.findById(releaseId)
+                .orElseThrow(() -> new AppException("Release not found", HttpStatus.NOT_FOUND));
+        if (!canView(release, user)) {
+            // 404 rather than 403 so unpublished releases cannot be probed for.
+            throw new AppException("Release not found", HttpStatus.NOT_FOUND);
+        }
+        return release;
+    }
+
+    /** The track, if its release is visible to {@code user}; otherwise 404. */
+    public MusicTrack getVisibleTrack(Long trackId, User user) {
+        MusicTrack track = trackRepository.findById(trackId)
+                .orElseThrow(() -> new AppException("Track not found", HttpStatus.NOT_FOUND));
+        if (track.getRelease() == null || !canView(track.getRelease(), user)) {
+            throw new AppException("Track not found", HttpStatus.NOT_FOUND);
+        }
+        return track;
+    }
+
+    // Small LRU cache of generated previews: cutting one means loading the full audio blob.
+    private static final int PREVIEW_CACHE_SIZE = 64;
+    private final Map<Long, byte[]> previewCache = Collections.synchronizedMap(
+            new LinkedHashMap<>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<Long, byte[]> eldest) {
+                    return size() > PREVIEW_CACHE_SIZE;
+                }
+            });
+
+    /** Full-length audio bytes. Callers must have checked entitlement first. */
+    public byte[] loadFullAudio(MusicTrack track) {
+        return fileStorageService.loadFileBytes(track.getAudioFileUrl());
+    }
+
+    /** A server-cut preview containing only the track's preview window (5 seconds by default). */
+    public byte[] loadPreviewAudio(MusicTrack track) {
+        return previewCache.computeIfAbsent(track.getId(), id -> {
+            int seconds = track.getPreviewDurationSeconds() != null && track.getPreviewDurationSeconds() > 0
+                    ? track.getPreviewDurationSeconds() : DEFAULT_PREVIEW_SECONDS;
+            try {
+                return com.celebstash.backend.util.AudioPreviewUtil.trimToSeconds(loadFullAudio(track), seconds);
+            } catch (IllegalArgumentException ex) {
+                throw new AppException("A preview is not available for this track.", HttpStatus.UNPROCESSABLE_ENTITY);
+            }
+        });
+    }
+
+    public static final int DEFAULT_PREVIEW_SECONDS = 5;
+
+    // ---------------------------------------------------------------------------------------------
+    // Admin review workflow. Approval applies to the whole release (single, EP, album or playlist)
+    // and all of its tracks, because tracks have no publication state of their own.
+
+    public List<MusicRelease> getReleasesForReview(String status) {
+        if (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status)) {
+            // Drafts have not been submitted, so they are not the administrator's concern.
+            return releaseRepository.findByStatusInOrderByCreatedAtDesc(List.of(
+                    MusicRelease.STATUS_PENDING_REVIEW, MusicRelease.STATUS_PUBLISHED,
+                    MusicRelease.STATUS_REJECTED, MusicRelease.STATUS_ARCHIVED));
+        }
+        return releaseRepository.findByStatusOrderByCreatedAtDesc(status.trim().toUpperCase());
+    }
+
+    public MusicRelease getReleaseForReview(Long releaseId) {
+        return releaseRepository.findById(releaseId)
+                .orElseThrow(() -> new AppException("Release not found", HttpStatus.NOT_FOUND));
+    }
+
+    @Transactional
+    public MusicRelease approveRelease(Long releaseId, User admin) {
+        if (!isAdmin(admin)) {
+            throw new AppException("Only administrators can approve music", HttpStatus.FORBIDDEN);
+        }
+        MusicRelease release = getReleaseForReview(releaseId);
+        if (!MusicRelease.STATUS_PENDING_REVIEW.equalsIgnoreCase(release.getStatus())
+                && !MusicRelease.STATUS_REJECTED.equalsIgnoreCase(release.getStatus())) {
+            throw new AppException("Only releases awaiting review can be approved (current status: " + release.getStatus() + ")", HttpStatus.CONFLICT);
+        }
+        if (release.getTracks() == null || release.getTracks().isEmpty()) {
+            throw new AppException("A release without tracks cannot be approved", HttpStatus.BAD_REQUEST);
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        release.setStatus(MusicRelease.STATUS_PUBLISHED);
+        release.setReviewedAt(now);
+        release.setRejectionReason(null);
+        if (release.getApprovedAt() == null) {
+            release.setApprovedAt(now);
+        }
+        if (release.getPublicReleaseDate() == null) {
+            release.setPublicReleaseDate(now);
+        }
+        if (release.getAvailabilityStatus() == null || release.getAvailabilityStatus().equalsIgnoreCase("DRAFT")) {
+            release.setAvailabilityStatus("PUBLICLY_RELEASED");
+        }
+        MusicRelease saved = releaseRepository.save(release);
+
+        notificationService.createNotification(
+                release.getArtist(),
+                "Release Approved",
+                "'" + release.getTitle() + "' was approved and is now live for fans.",
+                NotificationType.MUSIC_RELEASE_APPROVED,
+                release.getId());
+        notifyWaitlist(release);
+        return saved;
+    }
+
+    @Transactional
+    public MusicRelease rejectRelease(Long releaseId, User admin, String reason) {
+        if (!isAdmin(admin)) {
+            throw new AppException("Only administrators can reject music", HttpStatus.FORBIDDEN);
+        }
+        if (reason == null || reason.trim().isEmpty()) {
+            throw new AppException("A rejection reason is required", HttpStatus.BAD_REQUEST);
+        }
+        MusicRelease release = getReleaseForReview(releaseId);
+        if (!MusicRelease.STATUS_PENDING_REVIEW.equalsIgnoreCase(release.getStatus())) {
+            throw new AppException("Only releases awaiting review can be rejected (current status: " + release.getStatus() + ")", HttpStatus.CONFLICT);
+        }
+
+        String trimmed = reason.trim();
+        release.setStatus(MusicRelease.STATUS_REJECTED);
+        release.setReviewedAt(LocalDateTime.now());
+        release.setRejectionReason(trimmed.length() > 1000 ? trimmed.substring(0, 1000) : trimmed);
+        MusicRelease saved = releaseRepository.save(release);
+
+        notificationService.createNotification(
+                release.getArtist(),
+                "Release Not Approved",
+                "'" + release.getTitle() + "' was not approved. Reason: " + release.getRejectionReason(),
+                NotificationType.MUSIC_RELEASE_REJECTED,
+                release.getId());
+        return saved;
+    }
+
+    private void notifyWaitlist(MusicRelease release) {
+        String artistName = release.getArtist() != null ? release.getArtist().getFullName() : "the artist";
+        for (MusicWaitlist w : waitlistRepository.findByRelease(release)) {
+            if (!w.isNotified()) {
+                notificationService.createNotification(
+                        w.getUser(),
+                        "Release Available!",
+                        "'" + release.getTitle() + "' by " + artistName + " is now available to unlock!",
+                        NotificationType.NEW_MUSIC_FROM_FOLLOWED_ARTIST,
+                        release.getId()
+                );
+                w.setNotified(true);
+                waitlistRepository.save(w);
+            }
+        }
+    }
+
+    /** Maps the status an uploader asked for onto the lifecycle; only admins may publish directly. */
+    public String resolveInitialStatus(String requestedStatus, User uploader) {
+        String requested = requestedStatus == null ? "" : requestedStatus.trim().toUpperCase();
+        if (MusicRelease.STATUS_DRAFT.equals(requested)) {
+            return MusicRelease.STATUS_DRAFT;
+        }
+        if (isAdmin(uploader) && MusicRelease.STATUS_PUBLISHED.equals(requested)) {
+            return MusicRelease.STATUS_PUBLISHED;
+        }
+        return MusicRelease.STATUS_PENDING_REVIEW;
     }
 
     public Optional<MusicRelease> getReleaseById(Long id) {
@@ -72,8 +264,7 @@ public class MusicService {
 
     @Transactional(readOnly = true)
     public ReleaseDetailResponse getReleaseDetail(Long releaseId, User currentUser) {
-        MusicRelease release = releaseRepository.findById(releaseId)
-                .orElseThrow(() -> new AppException("Release not found", HttpStatus.NOT_FOUND));
+        MusicRelease release = getVisibleRelease(releaseId, currentUser);
 
         boolean isArtistOwner = currentUser != null && release.getArtist() != null &&
                 release.getArtist().getId().equals(currentUser.getId());
@@ -192,9 +383,16 @@ public class MusicService {
 
     @Transactional
     public MusicRelease createRelease(MusicRelease release, List<ReleaseBenefitDto> benefits, List<MusicExclusiveContentDto> exclusiveContents, User artist) {
+        // The artist always comes from the authenticated principal, never from the request.
         release.setArtist(artist);
-        if (release.getStatus() == null) {
-            release.setStatus("DRAFT");
+        release.setStatus(resolveInitialStatus(release.getStatus(), artist));
+        LocalDateTime now = LocalDateTime.now();
+        if (MusicRelease.STATUS_PENDING_REVIEW.equals(release.getStatus())) {
+            release.setSubmittedAt(now);
+        } else if (MusicRelease.STATUS_PUBLISHED.equals(release.getStatus())) {
+            release.setSubmittedAt(now);
+            release.setReviewedAt(now);
+            release.setApprovedAt(now);
         }
 
         // Auto-create community conversation if community benefit enabled
@@ -277,7 +475,12 @@ public class MusicService {
         if (updated.getReleaseType() != null) release.setReleaseType(updated.getReleaseType());
         if (updated.getGenre() != null) release.setGenre(updated.getGenre());
         if (updated.getSubgenre() != null) release.setSubgenre(updated.getSubgenre());
-        if (updated.getAlbumPrice() != null) release.setAlbumPrice(updated.getAlbumPrice());
+        if (updated.getAlbumPrice() != null) {
+            if (updated.getAlbumPrice().compareTo(BigDecimal.ZERO) < 0) {
+                throw new AppException("Price cannot be negative", HttpStatus.BAD_REQUEST);
+            }
+            release.setAlbumPrice(updated.getAlbumPrice());
+        }
         if (updated.getReleaseDate() != null) release.setReleaseDate(updated.getReleaseDate());
         if (updated.getEarlyAccessDate() != null) release.setEarlyAccessDate(updated.getEarlyAccessDate());
         release.setDownloadAllowed(updated.isDownloadAllowed());
@@ -326,44 +529,48 @@ public class MusicService {
         return releaseRepository.save(release);
     }
 
+    /**
+     * Submits a draft (or a rejected release the artist has revised) for administrator review.
+     * Publishing itself happens only through {@link #approveRelease}; an administrator calling this
+     * endpoint approves the release directly.
+     */
     @Transactional
     public MusicRelease publishRelease(Long releaseId, User artist) {
         MusicRelease release = releaseRepository.findById(releaseId)
                 .orElseThrow(() -> new AppException("Release not found", HttpStatus.NOT_FOUND));
 
-        if (!release.getArtist().getId().equals(artist.getId()) && artist.getRole() != Role.ADMIN) {
-            throw new AppException("You do not have permission to publish this release", HttpStatus.FORBIDDEN);
+        if (isAdmin(artist)) {
+            return approveRelease(releaseId, artist);
+        }
+        if (!isOwner(release, artist)) {
+            throw new AppException("You do not have permission to submit this release", HttpStatus.FORBIDDEN);
         }
 
-        release.setStatus("PUBLISHED");
-        if (release.getAvailabilityStatus() == null || release.getAvailabilityStatus().equalsIgnoreCase("DRAFT")) {
-            release.setAvailabilityStatus("PUBLICLY_RELEASED");
+        String status = release.getStatus() == null ? "" : release.getStatus().toUpperCase();
+        if (MusicRelease.STATUS_PENDING_REVIEW.equals(status) || MusicRelease.STATUS_PUBLISHED.equals(status)) {
+            return release;
         }
-        MusicRelease saved = releaseRepository.save(release);
-
-        // Notify waitlist members
-        List<MusicWaitlist> waitlist = waitlistRepository.findByRelease(release);
-        for (MusicWaitlist w : waitlist) {
-            if (!w.isNotified()) {
-                notificationService.createNotification(
-                        w.getUser(),
-                        "Release Available!",
-                        "'" + release.getTitle() + "' by " + artist.getFullName() + " is now available to unlock!",
-                        NotificationType.NEW_MUSIC_FROM_FOLLOWED_ARTIST,
-                        release.getId()
-                );
-                w.setNotified(true);
-                waitlistRepository.save(w);
-            }
+        if (!MusicRelease.STATUS_DRAFT.equals(status) && !MusicRelease.STATUS_REJECTED.equals(status)) {
+            throw new AppException("This release cannot be submitted for review from status " + status, HttpStatus.CONFLICT);
+        }
+        if (release.getTracks() == null || release.getTracks().isEmpty()) {
+            throw new AppException("Add at least one track before submitting for review", HttpStatus.BAD_REQUEST);
         }
 
-        return saved;
+        release.setStatus(MusicRelease.STATUS_PENDING_REVIEW);
+        release.setSubmittedAt(LocalDateTime.now());
+        return releaseRepository.save(release);
     }
 
     @Transactional
     public MusicAccess purchaseReleaseAccess(User buyer, PurchaseAccessDto req) {
         MusicRelease release = releaseRepository.findById(req.getReleaseId())
                 .orElseThrow(() -> new AppException("Release not found", HttpStatus.NOT_FOUND));
+
+        // Only approved, live releases are for sale. Pending, rejected, draft and archived ones are not.
+        if (!MusicRelease.STATUS_PUBLISHED.equalsIgnoreCase(release.getStatus())) {
+            throw new AppException("This release is not available for purchase", HttpStatus.NOT_FOUND);
+        }
 
         // Determine target recipient (fan receiving access)
         User targetFan = buyer;
@@ -379,16 +586,23 @@ public class MusicService {
             }
         }
 
-        // Idempotency: Prevent duplicate purchases
+        if (isOwner(release, targetFan)) {
+            throw new AppException("The artist already owns this release", HttpStatus.CONFLICT);
+        }
+
+        // The price always comes from the database; any price the client sends is ignored.
+        BigDecimal price = release.getAlbumPrice() != null ? release.getAlbumPrice() : BigDecimal.valueOf(9.99);
+
+        // Wallet payment flow. The wallet row is locked for the rest of the transaction so two
+        // concurrent purchases (a double tap, a retried request) cannot both pass the checks below.
+        Wallet unlockedWallet = walletRepository.findByUser(buyer)
+                .orElseGet(() -> walletRepository.save(Wallet.builder().user(buyer).balance(BigDecimal.ZERO).createdAt(LocalDateTime.now()).build()));
+        Wallet buyerWallet = walletRepository.findByIdForUpdate(unlockedWallet.getId()).orElse(unlockedWallet);
+
+        // Idempotency: Prevent duplicate purchases (checked after taking the lock)
         if (accessRepository.existsByUserAndReleaseAndStatus(targetFan, release, MusicAccessStatus.ACTIVE)) {
             throw new AppException((req.isGift() ? "Recipient" : "You") + " already have Access to this release", HttpStatus.CONFLICT);
         }
-
-        BigDecimal price = release.getAlbumPrice() != null ? release.getAlbumPrice() : BigDecimal.valueOf(9.99);
-
-        // Wallet payment flow
-        Wallet buyerWallet = walletRepository.findByUser(buyer)
-                .orElseGet(() -> walletRepository.save(Wallet.builder().user(buyer).balance(BigDecimal.ZERO).createdAt(LocalDateTime.now()).build()));
 
         // Validate PIN if set
         if (buyerWallet.getPin() != null && !buyerWallet.getPin().isEmpty()) {
@@ -545,8 +759,10 @@ public class MusicService {
 
     @Transactional
     public MusicWaitlist joinWaitlist(User user, Long releaseId) {
-        MusicRelease release = releaseRepository.findById(releaseId)
-                .orElseThrow(() -> new AppException("Release not found", HttpStatus.NOT_FOUND));
+        MusicRelease release = getVisibleRelease(releaseId, user);
+        if (!MusicRelease.STATUS_PUBLISHED.equalsIgnoreCase(release.getStatus())) {
+            throw new AppException("This release is not open for a waitlist", HttpStatus.BAD_REQUEST);
+        }
 
         if (waitlistRepository.existsByUserAndRelease(user, release)) {
             throw new AppException("You are already on the waitlist for this release", HttpStatus.CONFLICT);
@@ -584,7 +800,10 @@ public class MusicService {
         if (track == null) return response;
 
         MusicRelease release = track.getRelease();
-        if (release != null && release.getArtist() != null && release.getArtist().getId().equals(user.getId())) {
+        if (release == null || !canView(release, user)) return response;
+
+        // Owners hear their own work; administrators review submissions in full.
+        if (isOwner(release, user) || isAdmin(user)) {
             response.put("hasFullAccess", true);
             response.put("remainingPlays", 999999);
             response.put("isPermanent", true);
@@ -624,7 +843,7 @@ public class MusicService {
         if (track == null || !track.isAllowDownload()) return false;
 
         MusicRelease release = track.getRelease();
-        if (release == null || !release.isDownloadAllowed()) return false;
+        if (release == null || !release.isDownloadAllowed() || !canView(release, user)) return false;
 
         if (release.getArtist() != null && release.getArtist().getId().equals(user.getId())) {
             return true;
@@ -644,8 +863,7 @@ public class MusicService {
     }
 
     public List<MusicExclusiveContentDto> getExclusiveContents(User user, Long releaseId) {
-        MusicRelease release = releaseRepository.findById(releaseId)
-                .orElseThrow(() -> new AppException("Release not found", HttpStatus.NOT_FOUND));
+        MusicRelease release = getVisibleRelease(releaseId, user);
 
         boolean isArtist = user != null && release.getArtist() != null && release.getArtist().getId().equals(user.getId());
         boolean hasExclusive = false;
@@ -677,8 +895,10 @@ public class MusicService {
     public ArtistStudioStatsDto getArtistStudioStats(User artist) {
         List<MusicRelease> allReleases = releaseRepository.findByArtistOrderByCreatedAtDesc(artist);
         long total = allReleases.size();
-        long drafts = allReleases.stream().filter(r -> "DRAFT".equalsIgnoreCase(r.getStatus())).count();
-        long published = allReleases.stream().filter(r -> "PUBLISHED".equalsIgnoreCase(r.getStatus())).count();
+        long drafts = allReleases.stream().filter(r -> MusicRelease.STATUS_DRAFT.equalsIgnoreCase(r.getStatus())).count();
+        long published = allReleases.stream().filter(r -> MusicRelease.STATUS_PUBLISHED.equalsIgnoreCase(r.getStatus())).count();
+        long pending = allReleases.stream().filter(r -> MusicRelease.STATUS_PENDING_REVIEW.equalsIgnoreCase(r.getStatus())).count();
+        long rejected = allReleases.stream().filter(r -> MusicRelease.STATUS_REJECTED.equalsIgnoreCase(r.getStatus())).count();
 
         List<MusicAccess> artistAccesses = accessRepository.findByArtistReleases(artist);
         long totalOrders = artistAccesses.size();
@@ -708,6 +928,8 @@ public class MusicService {
                 .totalReleases(total)
                 .draftReleases(drafts)
                 .publishedReleases(published)
+                .pendingReleases(pending)
+                .rejectedReleases(rejected)
                 .totalOrders(totalOrders)
                 .totalRevenue(totalRevenue)
                 .artistPayouts(artistPayouts)
@@ -752,12 +974,8 @@ public class MusicService {
 
     @Transactional
     public MusicPlay recordPlay(Long trackId, User user) {
-        MusicTrack track = trackRepository.findById(trackId)
-                .orElseThrow(() -> new AppException("Track not found", HttpStatus.NOT_FOUND));
+        MusicTrack track = getVisibleTrack(trackId, user);
         MusicRelease release = track.getRelease();
-        if (release == null) {
-            throw new AppException("Release not found for track", HttpStatus.NOT_FOUND);
-        }
 
         MusicPlay play = MusicPlay.builder()
                 .release(release)
@@ -944,8 +1162,11 @@ public class MusicService {
         if (release.getArtist() == null || !release.getArtist().getId().equals(currentUser.getId())) {
             throw new AppException("Access denied: Only the owning artist may archive this release", HttpStatus.FORBIDDEN);
         }
+        if (!MusicRelease.STATUS_PUBLISHED.equalsIgnoreCase(release.getStatus())) {
+            throw new AppException("Only published releases can be archived", HttpStatus.CONFLICT);
+        }
 
-        release.setStatus("ARCHIVED");
+        release.setStatus(MusicRelease.STATUS_ARCHIVED);
         return releaseRepository.save(release);
     }
 
@@ -957,8 +1178,13 @@ public class MusicService {
         if (release.getArtist() == null || !release.getArtist().getId().equals(currentUser.getId())) {
             throw new AppException("Access denied: Only the owning artist may modify this release", HttpStatus.FORBIDDEN);
         }
+        if (!MusicRelease.STATUS_ARCHIVED.equalsIgnoreCase(release.getStatus())) {
+            throw new AppException("Only archived releases can be unarchived", HttpStatus.CONFLICT);
+        }
 
-        release.setStatus("PUBLISHED");
+        // Going back on sale requires a prior administrator approval; anything else returns to
+        // draft so it has to pass review first.
+        release.setStatus(release.getApprovedAt() != null ? MusicRelease.STATUS_PUBLISHED : MusicRelease.STATUS_DRAFT);
         return releaseRepository.save(release);
     }
 }

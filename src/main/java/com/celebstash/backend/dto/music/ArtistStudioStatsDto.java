@@ -16,6 +16,8 @@ public class ArtistStudioStatsDto {
     private long totalReleases;
     private long draftReleases;
     private long publishedReleases;
+    private long pendingReleases;
+    private long rejectedReleases;
     private long totalOrders;
     private BigDecimal totalRevenue;
     private BigDecimal artistPayouts;

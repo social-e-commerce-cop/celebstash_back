@@ -45,6 +45,8 @@ public enum NotificationType {
 
     // Music
     NEW_MUSIC_FROM_FOLLOWED_ARTIST,
+    MUSIC_RELEASE_APPROVED,
+    MUSIC_RELEASE_REJECTED,
     MUSIC_UNLOCKED,
     PLAYS_EXHAUSTED,
 

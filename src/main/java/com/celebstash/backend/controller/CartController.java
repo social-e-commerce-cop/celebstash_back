@@ -32,8 +32,10 @@ public class CartController {
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<CartResponse> addProductToCart(
             @RequestParam Long productId,
-            @RequestParam @Min(value = 1, message = "Quantity must be at least 1") Integer quantity) {
-        return ResponseEntity.ok(cartService.addProductToCart(productId, quantity));
+            @RequestParam @Min(value = 1, message = "Quantity must be at least 1") Integer quantity,
+            @RequestParam(required = false) String size,
+            @RequestParam(required = false) String color) {
+        return ResponseEntity.ok(cartService.addProductToCart(productId, quantity, size, color));
     }
 
     @PutMapping("/items/{productId}")
@@ -53,10 +55,10 @@ public class CartController {
     }
 
     @DeleteMapping
-    @Operation(summary = "Clear cart", description = "Removes all items from the user's cart")
+    @Operation(summary = "Clear cart", description = "Removes all items from the user's cart and releases their stock and escrow holds")
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<Void> clearCart() {
-        cartService.clearCart();
+        cartService.releaseAndClearCart();
         return ResponseEntity.noContent().build();
     }
 }

@@ -31,6 +31,11 @@ public class CartItem {
     @Column(nullable = false)
     private Integer quantity;
 
+    // Variant the buyer picked on the product page; carried into the order item for fulfilment.
+    private String selectedSize;
+
+    private String selectedColor;
+
     @OneToOne(fetch = FetchType.LAZY, cascade = CascadeType.ALL)
     @JoinColumn(name = "reservation_id")
     private Reservation reservation;

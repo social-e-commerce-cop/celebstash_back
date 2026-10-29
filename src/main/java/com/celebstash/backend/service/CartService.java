@@ -63,7 +63,17 @@ public class CartService {
      */
     @Transactional
     public CartResponse addProductToCart(Long productId, Integer quantity) {
-        if (quantity <= 0) {
+        return addProductToCart(productId, quantity, null, null);
+    }
+
+    /**
+     * Add a product to the user's cart, recording the size/colour the buyer picked.
+     * The cart holds one line per product, so a product already in the cart with a different
+     * variant is rejected rather than silently overwritten.
+     */
+    @Transactional
+    public CartResponse addProductToCart(Long productId, Integer quantity, String selectedSize, String selectedColor) {
+        if (quantity == null || quantity <= 0) {
             throw new AppException("Quantity must be greater than 0", HttpStatus.BAD_REQUEST);
         }
 
@@ -73,6 +83,23 @@ public class CartService {
         // Only approved products can be added to cart
         if (product.getStatus() != ProductStatus.APPROVED) {
             throw new AppException("Product is not available for purchase", HttpStatus.BAD_REQUEST);
+        }
+
+        String size = normalizeVariant(selectedSize);
+        String color = normalizeVariant(selectedColor);
+        if (size != null && product.getSizeStock() != null && !product.getSizeStock().isEmpty()
+                && product.getSizeStock().keySet().stream().noneMatch(s -> s.equalsIgnoreCase(size))) {
+            throw new AppException("Size " + size + " is not offered for this product", HttpStatus.BAD_REQUEST);
+        }
+        if (color != null && product.getAvailableColors() != null && !product.getAvailableColors().isEmpty()
+                && product.getAvailableColors().stream().noneMatch(c -> c.equalsIgnoreCase(color))) {
+            throw new AppException("Colour " + color + " is not offered for this product", HttpStatus.BAD_REQUEST);
+        }
+
+        Cart existingCart = getOrCreateCart();
+        CartItem lineInCart = cartItemRepository.findByCartAndProduct(existingCart, product).orElse(null);
+        if (lineInCart != null && (variantDiffers(lineInCart.getSelectedSize(), size) || variantDiffers(lineInCart.getSelectedColor(), color))) {
+            throw new AppException("This product is already in your cart with a different size or colour. Remove it first to change the option.", HttpStatus.CONFLICT);
         }
 
         // Check if there's enough stock
@@ -113,8 +140,25 @@ public class CartService {
                 existingRes.setRequiredAmount(existingRes.getRequiredAmount().add(totalPrice));
                 existingRes.setExpiresAt(LocalDateTime.now().plusHours(24));
                 reservationRepository.save(existingRes);
+            } else {
+                // The old reservation already ended and gave its stock and hold back, so the line
+                // restarts from what was just locked; without a fresh reservation the hold taken
+                // above would never be released or consumed.
+                Reservation fresh = Reservation.builder()
+                        .user(currentUser)
+                        .product(product)
+                        .quantity(quantity)
+                        .heldAmount(heldAmount)
+                        .requiredAmount(totalPrice)
+                        .status(ReservationStatus.PENDING)
+                        .expiresAt(LocalDateTime.now().plusHours(24))
+                        .build();
+                existingItem.setReservation(reservationRepository.save(fresh));
+                existingItem.setQuantity(0);
             }
             existingItem.setQuantity(existingItem.getQuantity() + quantity);
+            // Keep the line's age in step with the reservation's renewed 24-hour window.
+            existingItem.setAddedAt(LocalDateTime.now());
             cartItemRepository.save(existingItem);
         } else {
             // Create a Reservation
@@ -134,6 +178,8 @@ public class CartService {
                     .cart(cart)
                     .product(product)
                     .quantity(quantity)
+                    .selectedSize(size)
+                    .selectedColor(color)
                     .reservation(reservation)
                     .addedAt(LocalDateTime.now())
                     .build();
@@ -249,6 +295,7 @@ public class CartService {
         }
 
         cartItem.setQuantity(quantity);
+        cartItem.setAddedAt(LocalDateTime.now());
         cartItemRepository.save(cartItem);
 
         return mapToCartResponse(cart);
@@ -265,12 +312,36 @@ public class CartService {
     }
 
     /**
-     * Clear the user's cart
+     * Empty the cart after its contents were turned into an order. The reservations stay PENDING:
+     * the order's payment consumes their escrow holds (see OrderService).
      */
     @Transactional
     public void clearCart() {
         Cart cart = getOrCreateCart();
         cartItemRepository.deleteByCart(cart);
+    }
+
+    /**
+     * User-initiated "empty my cart": also releases every stock lock and refunds every escrow hold,
+     * otherwise they would stay locked until the reservation expires.
+     */
+    @Transactional
+    public void releaseAndClearCart() {
+        Cart cart = getOrCreateCart();
+        for (CartItem item : cartItemRepository.findByCart(cart)) {
+            removeProductFromCart(item.getProduct().getId());
+        }
+    }
+
+    private static String normalizeVariant(String value) {
+        if (value == null || value.isBlank() || "N/A".equalsIgnoreCase(value.trim())) {
+            return null;
+        }
+        return value.trim();
+    }
+
+    private static boolean variantDiffers(String inCart, String requested) {
+        return inCart != null && requested != null && !inCart.equalsIgnoreCase(requested);
     }
 
     private void expireCartItem(CartItem item) {
@@ -356,6 +427,11 @@ public class CartService {
                         product.getImageUrls().get(0) : null)
                 .productPrice(product.getPrice())
                 .quantity(cartItem.getQuantity())
+                .selectedSize(cartItem.getSelectedSize())
+                .selectedColor(cartItem.getSelectedColor())
+                // Stock is decremented when it is reserved, so this is what is left for increases.
+                .stockAvailable(product.getStockQuantity())
+                .available(product.getStatus() == ProductStatus.APPROVED)
                 .subtotal(subtotal)
                 .build();
     }

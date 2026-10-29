@@ -1,5 +1,6 @@
 package com.celebstash.backend.controller;
 
+import com.celebstash.backend.repository.MusicTrackRepository;
 import com.celebstash.backend.service.FileStorageService;
 import com.celebstash.backend.util.UrlSigner;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +30,16 @@ public class FileController {
 
     private final FileStorageService fileStorageService;
     private final UrlSigner urlSigner;
+    private final MusicTrackRepository musicTrackRepository;
+
+    /**
+     * Track audio is stored like any other upload, but it is sold content: it may only leave the
+     * server through /api/music/tracks/{id}/stream, which checks purchase entitlement. Serving it
+     * here would let anyone who learns the file name download the full song.
+     */
+    private boolean isProtectedAudio(String cleanFileName) {
+        return musicTrackRepository.isProtectedAudioFile(cleanFileName);
+    }
 
     @PostMapping("/upload")
     public ResponseEntity<String> uploadFile(@RequestParam("file") MultipartFile file) {
@@ -61,6 +72,9 @@ public class FileController {
     @GetMapping("/{fileName:.+}")
     public ResponseEntity<Resource> downloadFile(@PathVariable String fileName, HttpServletRequest request) {
         String cleanFileName = cleanFileName(fileName);
+        if (isProtectedAudio(cleanFileName)) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
         Optional<com.celebstash.backend.model.StoredFile> sfOpt = fileStorageService.getStoredFile(cleanFileName);
         if (sfOpt.isPresent()) {
             com.celebstash.backend.model.StoredFile sf = sfOpt.get();
@@ -121,6 +135,9 @@ public class FileController {
         }
 
         String cleanFileName = cleanFileName(fileName);
+        if (isProtectedAudio(cleanFileName)) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
         Optional<com.celebstash.backend.model.StoredFile> sfOpt = fileStorageService.getStoredFile(cleanFileName);
         if (sfOpt.isPresent()) {
             com.celebstash.backend.model.StoredFile sf = sfOpt.get();

@@ -214,10 +214,24 @@ public class MusicDirectToFanIntegrationTest {
 
     @Test
     @Order(4)
-    @DisplayName("Test 4 — Publish: Release becomes public")
+    @DisplayName("Test 4 — Submit + Approve: Release becomes public only after admin approval")
     void test4_publishRelease() {
         assertNotNull(testReleaseId);
-        MusicRelease published = musicService.publishRelease(testReleaseId, artist);
+        MusicRelease submitted = musicService.publishRelease(testReleaseId, artist);
+        assertEquals("PENDING_REVIEW", submitted.getStatus());
+        assertFalse(musicService.getAllReleases().stream().anyMatch(r -> r.getId().equals(testReleaseId)),
+                "a release awaiting review must not be public");
+
+        User admin = userRepository.findByUsername("test_admin_dtf").orElseGet(() ->
+                userRepository.save(User.builder()
+                        .username("test_admin_dtf")
+                        .email("admin_dtf@zikii.com")
+                        .fullName("Test Admin DTF")
+                        .password("password123")
+                        .role(Role.ADMIN)
+                        .build())
+        );
+        MusicRelease published = musicService.approveRelease(testReleaseId, admin);
         assertEquals("PUBLISHED", published.getStatus());
 
         // Verify it appears in public releases

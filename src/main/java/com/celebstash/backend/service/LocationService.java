@@ -6,12 +6,15 @@ import com.celebstash.backend.exception.AppException;
 import com.celebstash.backend.model.Location;
 import com.celebstash.backend.model.User;
 import com.celebstash.backend.repository.LocationRepository;
+import com.celebstash.backend.model.enums.Role;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -23,6 +26,22 @@ public class LocationService {
 
     private final LocationRepository locationRepository;
     private final UserService userService;
+
+    /**
+     * Delivery fee applied to addresses that buyers create. The fee is charged on orders, so it is
+     * decided by the server, not by the client creating the address; only administrators may set a
+     * location-specific fee.
+     */
+    @Value("${app.delivery.default-fee:0}")
+    private BigDecimal defaultDeliveryFee;
+
+    private BigDecimal resolveDeliveryFee(BigDecimal requested, BigDecimal current) {
+        User currentUser = userService.getCurrentUser();
+        if (currentUser != null && currentUser.getRole() == Role.ADMIN && requested != null) {
+            return requested;
+        }
+        return current != null ? current : defaultDeliveryFee;
+    }
 
     /**
      * Create a new location
@@ -40,7 +59,7 @@ public class LocationService {
                 .state(request.getState())
                 .zipCode(request.getZipCode())
                 .country(request.getCountry())
-                .deliveryFee(request.getDeliveryFee())
+                .deliveryFee(resolveDeliveryFee(request.getDeliveryFee(), null))
                 .active(request.getActive() != null ? request.getActive() : true)
                 .user(currentUser)
                 .createdAt(LocalDateTime.now())
@@ -136,7 +155,7 @@ public class LocationService {
         location.setState(request.getState());
         location.setZipCode(request.getZipCode());
         location.setCountry(request.getCountry());
-        location.setDeliveryFee(request.getDeliveryFee());
+        location.setDeliveryFee(resolveDeliveryFee(request.getDeliveryFee(), location.getDeliveryFee()));
         if (request.getActive() != null) {
             location.setActive(request.getActive());
         }

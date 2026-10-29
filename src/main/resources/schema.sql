@@ -99,3 +99,15 @@ CREATE INDEX IF NOT EXISTS idx_music_plays_release ON music_plays(release_id);
 CREATE INDEX IF NOT EXISTS idx_music_plays_user ON music_plays(user_id);
 CREATE INDEX IF NOT EXISTS idx_music_plays_played_at ON music_plays(played_at);
 
+
+-- Music approval workflow + cart variants (mirrors db/2026-10-29-music-approval-and-cart-variants.sql)
+ALTER TABLE IF EXISTS music_releases ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMP;
+ALTER TABLE IF EXISTS music_releases ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP;
+ALTER TABLE IF EXISTS music_releases ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP;
+ALTER TABLE IF EXISTS music_releases ADD COLUMN IF NOT EXISTS rejection_reason VARCHAR(1000);
+UPDATE music_releases SET approved_at = COALESCE(updated_at, created_at), reviewed_at = COALESCE(updated_at, created_at)
+ WHERE status IN ('PUBLISHED', 'ARCHIVED') AND approved_at IS NULL;
+ALTER TABLE IF EXISTS music_releases DROP CONSTRAINT IF EXISTS music_releases_release_type_check;
+ALTER TABLE IF EXISTS notifications DROP CONSTRAINT IF EXISTS notifications_type_check;
+ALTER TABLE IF EXISTS cart_items ADD COLUMN IF NOT EXISTS selected_size VARCHAR(255);
+ALTER TABLE IF EXISTS cart_items ADD COLUMN IF NOT EXISTS selected_color VARCHAR(255);

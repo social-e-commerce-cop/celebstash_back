@@ -385,6 +385,20 @@ public class FileStorageService {
         throw new RuntimeException("File not found " + clean);
     }
 
+    /** Reads a stored file fully into memory (database first, then the local cache directory). */
+    @Transactional(readOnly = true)
+    public byte[] loadFileBytes(String fileName) {
+        Optional<StoredFile> fileOpt = storedFileRepository.findByFileName(cleanFileName(fileName));
+        if (fileOpt.isPresent() && fileOpt.get().getData() != null) {
+            return fileOpt.get().getData();
+        }
+        try (java.io.InputStream in = loadFileAsResource(fileName).getInputStream()) {
+            return in.readAllBytes();
+        } catch (IOException ex) {
+            throw new RuntimeException("Could not read file " + fileName, ex);
+        }
+    }
+
     private String cleanFileName(String fileName) {
         if (fileName == null) return "";
         if (fileName.contains("/api/files/")) {

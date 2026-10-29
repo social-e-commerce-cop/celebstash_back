@@ -94,3 +94,7 @@ spring.jackson.serialization.fail-on-empty-beans=false
 management.endpoints.web.exposure.include=health,info
 management.endpoint.health.show-details=when_authorized
 management.endpoint.health.probes.enabled=true
+
+# Delivery fee (in the wallet currency) charged on orders delivered to a buyer-created address.
+# Buyers cannot set fees themselves; administrators can override per location.
+app.delivery.default-fee=${APP_DELIVERY_DEFAULT_FEE:0}

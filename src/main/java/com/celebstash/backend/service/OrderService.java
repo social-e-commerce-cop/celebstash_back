@@ -9,6 +9,7 @@ import com.celebstash.backend.exception.AppException;
 import com.celebstash.backend.model.*;
 import com.celebstash.backend.model.enums.DeliveryOption;
 import com.celebstash.backend.model.enums.OrderStatus;
+import com.celebstash.backend.model.enums.ProductStatus;
 import com.celebstash.backend.model.enums.ReservationStatus;
 import com.celebstash.backend.model.enums.TransactionStatus;
 import com.celebstash.backend.model.enums.TransactionType;
@@ -63,6 +64,20 @@ public class OrderService {
         if (cart.getItems().isEmpty()) {
             throw new AppException("Cart is empty", HttpStatus.BAD_REQUEST);
         }
+
+        // Re-validate every line against the database before an order exists: the product must
+        // still be on sale and its stock must still be held by a live reservation for this user.
+        for (CartItem cartItem : cart.getItems()) {
+            Product product = cartItem.getProduct();
+            if (product.getStatus() != ProductStatus.APPROVED) {
+                throw new AppException("'" + product.getName() + "' is no longer available. Remove it from your cart to continue.", HttpStatus.CONFLICT);
+            }
+            Reservation reservation = cartItem.getReservation();
+            if (reservation == null || reservation.getStatus() != ReservationStatus.PENDING
+                    || !reservation.getQuantity().equals(cartItem.getQuantity())) {
+                throw new AppException("Your reservation for '" + product.getName() + "' has expired. Add it to your cart again.", HttpStatus.CONFLICT);
+            }
+        }
         
         // Create the order
         Order order = Order.builder()
@@ -80,7 +95,11 @@ public class OrderService {
             
             Location location = locationRepository.findById(request.getLocationId())
                     .orElseThrow(() -> new AppException("Location not found", HttpStatus.NOT_FOUND));
-            
+            // Another user's address (and its delivery fee) must not be usable.
+            if (location.getUser() == null || !location.getUser().getId().equals(currentUser.getId())) {
+                throw new AppException("Location not found", HttpStatus.NOT_FOUND);
+            }
+
             order.setLocation(location);
             order.setDeliveryFee(location.getDeliveryFee());
         } else {
@@ -108,6 +127,7 @@ public class OrderService {
                     .productName(product.getName())
                     .price(product.getPrice())
                     .quantity(cartItem.getQuantity())
+                    .notes(describeVariant(cartItem))
                     .build();
             
             orderItems.add(orderItem);
@@ -149,14 +169,26 @@ public class OrderService {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new AppException("Order not found", HttpStatus.NOT_FOUND));
         
+        // Only the buyer may pay for their own order.
+        User requester = userService.getCurrentUser();
+        if (requester == null || !order.getUser().getId().equals(requester.getId())) {
+            throw new AppException("Order not found", HttpStatus.NOT_FOUND);
+        }
+
         // Check if order is already paid
         if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
             throw new AppException("Order is already paid or cancelled", HttpStatus.BAD_REQUEST);
         }
 
         User currentUser = order.getUser();
-        Wallet wallet = walletRepository.findByUser(currentUser)
+        Wallet unlockedWallet = walletRepository.findByUser(currentUser)
                 .orElseThrow(() -> new AppException("Wallet not found", HttpStatus.NOT_FOUND));
+        // Lock the wallet so a retried or double-submitted payment cannot be charged twice.
+        Wallet wallet = walletRepository.findByIdForUpdate(unlockedWallet.getId()).orElse(unlockedWallet);
+        Order lockedOrder = orderRepository.findById(orderId).orElse(order);
+        if (lockedOrder.getStatus() != OrderStatus.PENDING_PAYMENT) {
+            throw new AppException("Order is already paid or cancelled", HttpStatus.BAD_REQUEST);
+        }
 
         if (wallet.getPin() == null || !wallet.getPin().equals(pin)) {
             throw new AppException("Invalid PIN", HttpStatus.BAD_REQUEST);
@@ -325,11 +357,40 @@ public class OrderService {
             throw new AppException("Only pending payment orders can be cancelled", HttpStatus.BAD_REQUEST);
         }
         
+        // Give back the stock locks and escrow holds the unpaid order was carrying, instead of
+        // leaving them locked until the reservations expire.
+        Wallet wallet = walletRepository.findByUser(currentUser).orElse(null);
+        for (OrderItem item : orderItemRepository.findByOrder(order)) {
+            reservationRepository.findByUserAndProductAndStatus(currentUser, item.getProduct(), ReservationStatus.PENDING)
+                    .ifPresent(res -> {
+                        productRepository.findByIdForUpdate(res.getProduct().getId()).ifPresent(p -> {
+                            p.setStockQuantity(p.getStockQuantity() + res.getQuantity());
+                            productRepository.save(p);
+                        });
+                        if (wallet != null) {
+                            wallet.setBalance(wallet.getBalance().add(res.getHeldAmount()));
+                            wallet.setHeldBalance(wallet.getHeldBalance().subtract(res.getHeldAmount()));
+                        }
+                        res.setStatus(ReservationStatus.CANCELLED);
+                        reservationRepository.save(res);
+                    });
+        }
+        if (wallet != null) {
+            walletRepository.save(wallet);
+        }
+
         // Update order status
         order.setStatus(OrderStatus.CANCELLED);
-        
+
         Order updatedOrder = orderRepository.save(order);
         return mapToOrderResponse(updatedOrder);
+    }
+
+    private static String describeVariant(CartItem cartItem) {
+        List<String> parts = new ArrayList<>();
+        if (cartItem.getSelectedSize() != null) parts.add("Size: " + cartItem.getSelectedSize());
+        if (cartItem.getSelectedColor() != null) parts.add("Colour: " + cartItem.getSelectedColor());
+        return parts.isEmpty() ? null : String.join(", ", parts);
     }
 
     /**
@@ -376,6 +437,8 @@ public class OrderService {
                 .id(orderItem.getId())
                 .productId(orderItem.getProduct().getId())
                 .productName(orderItem.getProductName())
+                .productImageUrl(orderItem.getProduct().getImageUrls() != null && !orderItem.getProduct().getImageUrls().isEmpty()
+                        ? orderItem.getProduct().getImageUrls().get(0) : null)
                 .price(orderItem.getPrice())
                 .quantity(orderItem.getQuantity())
                 .subtotal(orderItem.getSubtotal())

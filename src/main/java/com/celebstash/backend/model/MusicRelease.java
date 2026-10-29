@@ -24,6 +24,14 @@ import java.util.List;
 @Table(name = "music_releases")
 public class MusicRelease {
 
+    // Publication lifecycle. Artists submit releases for review; only an administrator moves a
+    // release to PUBLISHED, and only PUBLISHED releases are discoverable or purchasable.
+    public static final String STATUS_DRAFT = "DRAFT";
+    public static final String STATUS_PENDING_REVIEW = "PENDING_REVIEW";
+    public static final String STATUS_PUBLISHED = "PUBLISHED";
+    public static final String STATUS_REJECTED = "REJECTED";
+    public static final String STATUS_ARCHIVED = "ARCHIVED";
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -84,11 +92,21 @@ public class MusicRelease {
 
     @Column(nullable = false)
     @Builder.Default
-    private String status = "PUBLISHED";
+    private String status = STATUS_DRAFT;
 
     @Column(nullable = true)
     @Builder.Default
     private String availabilityStatus = "UNRELEASED";
+
+    private LocalDateTime submittedAt;
+
+    private LocalDateTime reviewedAt;
+
+    /** Set the first time an administrator approves the release; never cleared afterwards. */
+    private LocalDateTime approvedAt;
+
+    @Column(length = 1000)
+    private String rejectionReason;
 
     @Column(precision = 10, scale = 2)
     private BigDecimal albumPrice;
@@ -102,6 +120,7 @@ public class MusicRelease {
 
     @OneToMany(mappedBy = "release", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     @Fetch(FetchMode.SUBSELECT)
+    @OrderBy("trackNumber ASC")
     @Builder.Default
     private List<MusicTrack> tracks = new ArrayList<>();
 
@@ -124,7 +143,7 @@ public class MusicRelease {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         if (status == null) {
-            status = "PUBLISHED";
+            status = STATUS_DRAFT;
         }
     }
 

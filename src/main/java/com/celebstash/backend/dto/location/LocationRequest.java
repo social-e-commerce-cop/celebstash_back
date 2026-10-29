@@ -37,7 +37,7 @@ public class LocationRequest {
     @Size(max = 100, message = "Country cannot exceed 100 characters")
     private String country;
     
-    @NotNull(message = "Delivery fee is required")
+    // Optional: ignored for non-admin callers, see LocationService.resolveDeliveryFee.
     @Min(value = 0, message = "Delivery fee must be greater than or equal to 0")
     private BigDecimal deliveryFee;
     

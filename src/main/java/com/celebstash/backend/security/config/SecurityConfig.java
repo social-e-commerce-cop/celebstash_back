@@ -67,7 +67,9 @@ public class SecurityConfig {
                                 "/api-docs/**",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
-                                "/ws/**" // WebSocket SockJS handshake
+                                "/ws/**", // WebSocket SockJS handshake
+                                // Payment provider callbacks; the provider has no user token.
+                                "/api/wallet/webhook/**"
                         ).permitAll()
                         // Username availability is checked on the signup form, before the user
                         // has an account or a token, so it cannot require authentication.
@@ -89,7 +91,13 @@ public class SecurityConfig {
                                 "/api/music/releases",
                                 "/api/music/releases/**",
                                 "/api/music/tracks/*/stream",
+                                // Entitlement is checked in the controller; the token may arrive as ?token=.
+                                "/api/music/tracks/*/download",
                                 "/api/music/tracks/*/access")
+                        .permitAll()
+                        // Play counting works for listeners who are not signed in.
+                        .requestMatchers(org.springframework.http.HttpMethod.POST,
+                                "/api/music/tracks/*/play")
                         .permitAll()
                         .anyRequest().authenticated())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -99,41 +107,6 @@ public class SecurityConfig {
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .authenticationProvider(authenticationProvider())
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
-            .csrf(AbstractHttpConfigurer::disable)
-            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers(
-                    "/api/v1/auth/**",
-                    "/api/files/**",
-                    "/api-docs/**",
-                    "/swagger-ui/**",
-                    "/swagger-ui.html",
-                    "/ws/**",          // WebSocket SockJS handshake
-                    "/api/wallet/webhook/**" // Payment provider webhooks
-                ).permitAll()
-                .requestMatchers(org.springframework.http.HttpMethod.GET, 
-                    "/api/files/**",
-                    "/api/posts",
-                    "/api/posts/feed",
-                    "/api/posts/discovery",
-                    "/api/posts/user/**",
-                    "/api/posts/*",
-                    "/api/posts/*/comments",
-                    "/api/posts/*/comments/**",
-                    "/api/follow/users/**",
-                    "/api/music/releases",
-                    "/api/music/releases/**",
-                    "/api/music/tracks/*/stream",
-                    "/api/music/tracks/*/access"
-                ).permitAll()
-                .requestMatchers(org.springframework.http.HttpMethod.POST,
-                    "/api/music/tracks/*/play"
-                ).permitAll()
-                .anyRequest().authenticated()
-            )
-            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .authenticationProvider(authenticationProvider())
-            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

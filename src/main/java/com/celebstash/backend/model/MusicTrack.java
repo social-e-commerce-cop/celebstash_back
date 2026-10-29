@@ -33,7 +33,10 @@ public class MusicTrack {
 
     private Integer trackNumber;
 
+    // Storage key of the full-length audio. Never serialized: clients play tracks through
+    // /api/music/tracks/{id}/stream, which serves a server-cut preview unless the caller holds Access.
     @Column(nullable = false)
+    @JsonIgnore
     private String audioFileUrl;
 
     private Integer durationSeconds;

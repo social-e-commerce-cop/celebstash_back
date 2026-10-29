@@ -7,6 +7,8 @@ import com.celebstash.backend.model.enums.*;
 import com.celebstash.backend.repository.UserRepository;
 import com.celebstash.backend.service.FileStorageService;
 import com.celebstash.backend.service.MusicService;
+import com.celebstash.backend.util.AudioPreviewUtil;
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
@@ -103,32 +105,70 @@ public class MusicController {
             throw new AppException("Only verified artists are permitted to publish music releases.", HttpStatus.FORBIDDEN);
         }
 
+        if (title == null || title.trim().isEmpty()) {
+            throw new AppException("A release title is required.", HttpStatus.BAD_REQUEST);
+        }
+
+        ReleaseType releaseType;
+        try {
+            releaseType = ReleaseType.valueOf(releaseTypeStr.trim().toUpperCase());
+        } catch (Exception ex) {
+            throw new AppException("Unknown release type '" + releaseTypeStr + "'. Use SINGLE, EP, ALBUM or PLAYLIST.", HttpStatus.BAD_REQUEST);
+        }
+
         // Cover Artwork Validation
         if (coverArt == null || coverArt.isEmpty()) {
-            throw new IllegalArgumentException("Cover artwork file is required.");
+            throw new AppException("Cover artwork file is required.", HttpStatus.BAD_REQUEST);
         }
         if (coverArt.getSize() > 10 * 1024 * 1024) {
-            throw new IllegalArgumentException("Cover artwork file size exceeds maximum limit of 10MB.");
+            throw new AppException("Cover artwork file size exceeds maximum limit of 10MB.", HttpStatus.BAD_REQUEST);
+        }
+        if (!isImageUpload(coverArt)) {
+            throw new AppException("Cover artwork must be an image (JPG, PNG, WEBP or HEIC).", HttpStatus.BAD_REQUEST);
         }
 
         // Audio Track Validation
         if (trackFiles == null || trackFiles.isEmpty()) {
-            throw new IllegalArgumentException("At least one audio track file is required.");
+            throw new AppException("At least one audio track file is required.", HttpStatus.BAD_REQUEST);
         }
+        if (releaseType == ReleaseType.SINGLE && trackFiles.size() != 1) {
+            throw new AppException("A single must contain exactly one track.", HttpStatus.BAD_REQUEST);
+        }
+        if (releaseType != ReleaseType.SINGLE && trackFiles.size() < 2) {
+            throw new AppException("An " + releaseType.name().toLowerCase() + " needs at least two tracks. Upload one track as a single.", HttpStatus.BAD_REQUEST);
+        }
+        if (albumPrice != null && albumPrice.compareTo(BigDecimal.ZERO) < 0) {
+            throw new AppException("Price cannot be negative.", HttpStatus.BAD_REQUEST);
+        }
+
+        // The file's bytes decide its format, not the client-supplied name or MIME type. Only formats
+        // the server can cut a genuine preview from are accepted (see AudioPreviewUtil).
+        List<Integer> trackDurations = new ArrayList<>();
         for (int i = 0; i < trackFiles.size(); i++) {
             MultipartFile audioFile = trackFiles.get(i);
             if (audioFile == null || audioFile.isEmpty()) {
-                throw new IllegalArgumentException("Track #" + (i + 1) + " audio file is empty or corrupted.");
+                throw new AppException("Track #" + (i + 1) + " audio file is empty or corrupted.", HttpStatus.BAD_REQUEST);
             }
             if (audioFile.getSize() > 100 * 1024 * 1024) {
-                throw new IllegalArgumentException("Track #" + (i + 1) + " audio file size exceeds maximum 100MB limit.");
+                throw new AppException("Track #" + (i + 1) + " audio file size exceeds maximum 100MB limit.", HttpStatus.BAD_REQUEST);
             }
+            if (trackPrices != null && i < trackPrices.size() && trackPrices.get(i) != null
+                    && trackPrices.get(i).compareTo(BigDecimal.ZERO) < 0) {
+                throw new AppException("Track #" + (i + 1) + " price cannot be negative.", HttpStatus.BAD_REQUEST);
+            }
+            byte[] audioBytes;
+            try {
+                audioBytes = audioFile.getBytes();
+            } catch (java.io.IOException ex) {
+                throw new AppException("Track #" + (i + 1) + " could not be read.", HttpStatus.BAD_REQUEST);
+            }
+            if (AudioPreviewUtil.detectFormat(audioBytes) == null) {
+                throw new AppException("Track #" + (i + 1) + " is not a supported audio file. Upload MP3, WAV or AAC.", HttpStatus.BAD_REQUEST);
+            }
+            trackDurations.add(AudioPreviewUtil.durationSeconds(audioBytes));
         }
 
         String coverUrl = fileStorageService.storeFile(coverArt);
-
-        ReleaseType releaseType = ReleaseType.SINGLE;
-        try { releaseType = ReleaseType.valueOf(releaseTypeStr.toUpperCase()); } catch (Exception ignored) {}
 
         LocalDateTime earlyAccessDate = null;
         if (earlyAccessDateStr != null && !earlyAccessDateStr.trim().isEmpty()) {
@@ -171,8 +211,13 @@ public class MusicController {
                 .isExplicit(isExplicit != null && isExplicit)
                 .copyrightInfo(copyrightInfo)
                 .availabilityStatus(availabilityStatus != null && !availabilityStatus.isEmpty() ? availabilityStatus.toUpperCase() : "UNRELEASED")
-                .albumPrice(albumPrice != null ? albumPrice : BigDecimal.valueOf(9.99))
-                .status(status != null ? status.toUpperCase() : "DRAFT")
+                // Purchases are per release; for a single that is its one track, so it sells at the
+                // track price the artist entered rather than a separate bundle price.
+                .albumPrice(releaseType == ReleaseType.SINGLE && trackPrices != null && !trackPrices.isEmpty() && trackPrices.get(0) != null
+                        ? trackPrices.get(0)
+                        : (albumPrice != null ? albumPrice : BigDecimal.valueOf(9.99)))
+                // Only the requested intent; MusicService decides the real status (artists cannot self-publish).
+                .status(status)
                 .releaseStory(releaseStory)
                 .credits(credits)
                 .earlyAccessDate(earlyAccessDate)
@@ -213,8 +258,8 @@ public class MusicController {
                     .trackStory(trStory)
                     .isExplicit(trExplicit)
                     .isBonusTrack(isBonus)
-                    .durationSeconds(180)
-                    .previewDurationSeconds(5)
+                    .durationSeconds(trackDurations.get(i))
+                    .previewDurationSeconds(MusicService.DEFAULT_PREVIEW_SECONDS)
                     .allowDownload(downloadAllowed != null && downloadAllowed)
                     .build();
 
@@ -253,7 +298,7 @@ public class MusicController {
     }
 
     @PostMapping("/releases/{id}/publish")
-    @Operation(summary = "Publish a draft release directly to fans")
+    @Operation(summary = "Submit a draft or revised release for admin review (admins approve directly)")
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<MusicRelease> publishRelease(@PathVariable("id") Long releaseId) {
         User currentUser = getRequiredCurrentUser();
@@ -304,63 +349,96 @@ public class MusicController {
     }
 
     @GetMapping("/tracks/{id}/stream")
-    @Operation(summary = "Protected audio streaming endpoint (5s preview without Access; full audio with Access)")
+    @Operation(summary = "Protected audio streaming endpoint (server-cut 5s preview without Access; full audio with Access)")
     public ResponseEntity<Resource> streamAudio(
             @PathVariable("id") Long trackId,
-            @RequestParam(value = "token", required = false) String tokenParam,
-            @RequestHeader(value = HttpHeaders.RANGE, required = false) String rangeHeader
+            @RequestParam(value = "token", required = false) String tokenParam
     ) {
-        MusicTrack track = musicService.getTrackById(trackId)
-                .orElseThrow(() -> new AppException("Track not found", HttpStatus.NOT_FOUND));
-
-        User currentUser = getCurrentUser();
-        if (currentUser == null && StringUtils.hasText(tokenParam)) {
-            try {
-                String username = jwtUtils.extractUsername(tokenParam);
-                if (username != null) {
-                    currentUser = userRepository.findByUsername(username).orElse(null);
-                }
-            } catch (Exception ignored) {}
-        }
+        // Audio players cannot always send an Authorization header, so the access token may also
+        // arrive as a query parameter. Range requests are answered by Spring from the Resource body.
+        User currentUser = resolveUser(tokenParam);
+        MusicTrack track = musicService.getVisibleTrack(trackId, currentUser);
 
         Map<String, Object> access = musicService.verifyPlaybackAccess(currentUser, trackId);
-        boolean hasFullAccess = (boolean) access.get("hasFullAccess");
+        boolean hasFullAccess = Boolean.TRUE.equals(access.get("hasFullAccess"));
 
-        Resource audioResource = fileStorageService.loadFileAsResource(track.getAudioFileUrl());
-
-        if (!hasFullAccess) {
-            return ResponseEntity.ok()
-                    .contentType(MediaType.parseMediaType("audio/mpeg"))
-                    .header("Accept-Ranges", "bytes")
-                    .header("X-Preview-Only", "true")
-                    .header("X-Preview-Duration-Seconds", "5")
-                    .body(audioResource);
-        }
+        // Without Access the response body only ever contains the preview window: the full file
+        // never leaves the server, so a client cannot lift the 5-second limit.
+        byte[] audio = hasFullAccess ? musicService.loadFullAudio(track) : musicService.loadPreviewAudio(track);
+        int previewSeconds = track.getPreviewDurationSeconds() != null ? track.getPreviewDurationSeconds() : MusicService.DEFAULT_PREVIEW_SECONDS;
 
         return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType("audio/mpeg"))
+                .contentType(audioMediaType(audio, track))
                 .header("Accept-Ranges", "bytes")
-                .header("X-Preview-Only", "false")
-                .body(audioResource);
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .header("X-Preview-Only", String.valueOf(!hasFullAccess))
+                .header("X-Preview-Duration-Seconds", hasFullAccess ? "" : String.valueOf(previewSeconds))
+                .body(new ByteArrayResource(audio));
     }
 
     @GetMapping("/tracks/{id}/download")
     @Operation(summary = "Download track audio file (enforces Download Access benefit)")
-    @SecurityRequirement(name = "bearerAuth")
-    public ResponseEntity<Resource> downloadTrack(@PathVariable("id") Long trackId) {
-        User currentUser = getRequiredCurrentUser();
+    public ResponseEntity<Resource> downloadTrack(
+            @PathVariable("id") Long trackId,
+            @RequestParam(value = "token", required = false) String tokenParam
+    ) {
+        User currentUser = resolveUser(tokenParam);
+        if (currentUser == null) {
+            throw new AppException("Authentication required", HttpStatus.UNAUTHORIZED);
+        }
+        MusicTrack track = musicService.getVisibleTrack(trackId, currentUser);
         if (!musicService.canDownloadTrack(currentUser, trackId)) {
             throw new AppException("Download permission denied. This release does not include Download Access or your account does not hold active Access.", HttpStatus.FORBIDDEN);
         }
 
-        MusicTrack track = musicService.getTrackById(trackId)
-                .orElseThrow(() -> new AppException("Track not found", HttpStatus.NOT_FOUND));
-
-        Resource resource = fileStorageService.loadFileAsResource(track.getAudioFileUrl());
+        byte[] audio = musicService.loadFullAudio(track);
+        AudioPreviewUtil.AudioFormat format = AudioPreviewUtil.detectFormat(audio);
+        String extension = format != null ? format.getExtension() : ".mp3";
         return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType("audio/mpeg"))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + track.getTitle().replaceAll("[^a-zA-Z0-9.-]", "_") + ".mp3\"")
-                .body(resource);
+                .contentType(audioMediaType(audio, track))
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + track.getTitle().replaceAll("[^a-zA-Z0-9.-]", "_") + extension + "\"")
+                .body(new ByteArrayResource(audio));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Admin review of artist submissions
+
+    @GetMapping("/admin/releases")
+    @Operation(summary = "List submitted music releases for review (status: PENDING_REVIEW, PUBLISHED, REJECTED, ARCHIVED or ALL)")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<List<MusicRelease>> getReleasesForReview(
+            @RequestParam(value = "status", required = false) String status
+    ) {
+        return ResponseEntity.ok(musicService.getReleasesForReview(status));
+    }
+
+    @GetMapping("/admin/releases/{id}")
+    @Operation(summary = "Get any music release, including unpublished ones, for review")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<MusicRelease> getReleaseForReview(@PathVariable("id") Long id) {
+        return ResponseEntity.ok(musicService.getReleaseForReview(id));
+    }
+
+    @PostMapping("/admin/releases/{id}/approve")
+    @Operation(summary = "Approve a submitted release and publish it to fans")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<MusicRelease> approveRelease(@PathVariable("id") Long id) {
+        return ResponseEntity.ok(musicService.approveRelease(id, getRequiredCurrentUser()));
+    }
+
+    @PostMapping("/admin/releases/{id}/reject")
+    @Operation(summary = "Reject a submitted release with a reason shown to the artist")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<MusicRelease> rejectRelease(
+            @PathVariable("id") Long id,
+            @RequestBody RejectReleaseRequest req
+    ) {
+        return ResponseEntity.ok(musicService.rejectRelease(id, getRequiredCurrentUser(), req != null ? req.getReason() : null));
     }
 
     @GetMapping("/artist/studio")
@@ -448,6 +526,50 @@ public class MusicController {
             throw new AppException("Authentication required", HttpStatus.UNAUTHORIZED);
         }
         return user;
+    }
+
+    /** The authenticated user, falling back to a valid access token passed as a query parameter. */
+    private User resolveUser(String tokenParam) {
+        User currentUser = getCurrentUser();
+        if (currentUser == null && StringUtils.hasText(tokenParam)) {
+            try {
+                String username = jwtUtils.extractUsername(tokenParam);
+                if (username != null) {
+                    User candidate = userRepository.findByUsername(username).orElse(null);
+                    // Same checks as JwtAuthenticationFilter, including locked/disabled accounts.
+                    if (candidate != null && candidate.isEnabled() && candidate.isAccountNonLocked()
+                            && jwtUtils.validateToken(tokenParam, candidate)) {
+                        currentUser = candidate;
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        return currentUser;
+    }
+
+    private MediaType audioMediaType(byte[] audio, MusicTrack track) {
+        AudioPreviewUtil.AudioFormat format = AudioPreviewUtil.detectFormat(audio);
+        if (format != null) {
+            return MediaType.parseMediaType(format.getContentType());
+        }
+        // Tracks uploaded before format validation existed (e.g. M4A) are still served in full to
+        // entitled listeners; guess their type from the stored name.
+        String guessed = java.net.URLConnection.guessContentTypeFromName(track.getAudioFileUrl());
+        return MediaType.parseMediaType(guessed != null ? guessed : "audio/mpeg");
+    }
+
+    private static boolean isImageUpload(MultipartFile file) {
+        String type = file.getContentType();
+        if (type != null && type.toLowerCase().startsWith("image/")) {
+            return true;
+        }
+        String name = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
+        return name.matches(".*\\.(jpe?g|png|webp|heic|heif|gif)$");
+    }
+
+    @Data
+    public static class RejectReleaseRequest {
+        private String reason;
     }
 
     @Data

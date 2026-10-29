@@ -19,5 +19,9 @@ public class CartItemResponse {
     private String productImageUrl;
     private BigDecimal productPrice;
     private Integer quantity;
+    private String selectedSize;
+    private String selectedColor;
+    private Integer stockAvailable; // units still available beyond what this cart line holds
+    private boolean available; // false once the product is withdrawn from sale
     private BigDecimal subtotal; // price * quantity
 }
